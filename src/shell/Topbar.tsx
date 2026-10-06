@@ -20,6 +20,10 @@ const titles: Record<string, string> = {
 export function Topbar({ route, onToggle }: { route: Route; onToggle: () => void }) {
   const servers = useApp((s) => s.servers);
   const activity = useApp((s) => s.activity);
+  const host = useApp((s) => s.host);
+  const conn = useApp((s) => s.conn);
+  const lanIp = host?.interfaces.find((i) => i.name === host.defaultIface)?.addresses[0]?.split('/')[0] ?? location.hostname;
+  const liveTone = conn.mode === 'mock' ? 'bg-fg-3' : conn.state === 'online' ? 'bg-accent' : 'bg-amber';
   const [now, setNow] = useState(new Date());
   useEffect(() => {
     const iv = setInterval(() => setNow(new Date()), 1000);
@@ -37,7 +41,7 @@ export function Topbar({ route, onToggle }: { route: Route; onToggle: () => void
       </Tooltip>
       <div className="mx-1 h-4 w-px bg-line-2" />
       <div className="flex min-w-0 items-center gap-1 text-sm">
-        <span className="font-mono text-[11px] text-fg-4">WYZI-SERVER</span>
+        <span className="font-mono text-[11px] text-fg-4">{(host?.hostname ?? 'wyzi-server').toUpperCase()}</span>
         {crumbs.map((c, i) => (
           <span key={i} className="flex min-w-0 items-center gap-1">
             <ChevronRight size={12} className="text-fg-4" />
@@ -56,15 +60,15 @@ export function Topbar({ route, onToggle }: { route: Route; onToggle: () => void
         <Tooltip content="Portal is bound to the local network only">
           <span className="hidden h-6 items-center gap-1.5 rounded-[5px] px-2 text-xs text-fg-3 shadow-[inset_0_0_0_1px_var(--color-line-2)] md:flex">
             <Wifi size={12} className="text-fg-4" />
-            <span className="font-mono text-[11px]">192.168.1.40</span>
+            <span className="font-mono text-[11px]">{lanIp}</span>
           </span>
         </Tooltip>
         <span className="hidden items-center gap-1.5 px-2 text-xs text-fg-3 lg:flex">
           <span className="relative flex h-1.5 w-1.5">
-            <span className="absolute inset-0 animate-ping rounded-full bg-accent/50" style={{ animationDuration: '2.4s' }} />
-            <span className="h-1.5 w-1.5 rounded-full bg-accent" />
+            {conn.state === 'online' && <span className={`absolute inset-0 animate-ping rounded-full ${liveTone} opacity-50`} style={{ animationDuration: '2.4s' }} />}
+            <span className={`h-1.5 w-1.5 rounded-full ${liveTone}`} />
           </span>
-          Live
+          {conn.mode === 'mock' ? 'Prototype' : conn.state === 'online' ? 'Live' : conn.state === 'connecting' ? 'Connecting' : 'Offline'}
           <span className="num font-mono text-[11px] text-fg-4">{now.toTimeString().slice(0, 8)}</span>
         </span>
         <Dropdown

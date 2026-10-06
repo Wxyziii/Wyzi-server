@@ -77,16 +77,17 @@ export function CommandPalette() {
     servers.forEach((s) => {
       list.push({ id: 'o' + s.id, label: s.name, group: 'Servers', status: <StatusDot status={s.status} size={6} />, run: () => navigate(`/servers/${s.id}`), hint: `${s.loader} · ${s.mc}` });
     });
+    const backupTarget = servers.find((x) => x.status === 'running') ?? servers.find((x) => x.status !== 'undeployed');
     servers.forEach((s) => {
       if (s.status === 'running') list.push({ id: 'x' + s.id, label: `Stop ${s.name}`, group: 'Actions', icon: Square, run: () => stopServer(s.id) });
-      if (s.status === 'offline' || s.status === 'sleeping') list.push({ id: 's' + s.id, label: `Start ${s.name}`, group: 'Actions', icon: Play, run: () => requestStart(s.id) });
+      if (s.status === 'offline' || s.status === 'sleeping' || s.status === 'failed') list.push({ id: 's' + s.id, label: `Start ${s.name}`, group: 'Actions', icon: Play, run: () => requestStart(s.id) });
       if (s.status === 'running') list.push({ id: 'c' + s.id, label: `Open ${s.name} console`, group: 'Actions', icon: ArrowRight, run: () => navigate(`/servers/${s.id}/console`) });
     });
     list.push(
-      { id: 'bk', label: 'Back up Prominence II now', group: 'Actions', icon: Archive, run: () => { createBackup('prominence-ii'); navigate('/backups'); } },
+      ...(backupTarget ? [{ id: 'bk', label: `Back up ${backupTarget.name} now`, group: 'Actions', icon: Archive, run: () => { createBackup(backupTarget.id); navigate('/backups'); } }] : []),
       { id: 'cp', label: 'Copy public address', group: 'Actions', icon: Copy, run: () => copyAddress() },
       { id: 'rt', label: 'Restart Playit tunnel', group: 'Actions', icon: RefreshCw, run: () => restartTunnel() },
-      { id: 'up', label: 'Check for system updates', group: 'Actions', icon: RefreshCw, run: () => toast('System is up to date', 'success', 'Last checked just now') },
+      { id: 'up', label: 'Check for system updates', group: 'Actions', icon: RefreshCw, run: () => navigate('/system') },
     );
     return list;
   }, [servers]);

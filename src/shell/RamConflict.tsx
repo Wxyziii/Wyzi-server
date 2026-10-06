@@ -1,6 +1,6 @@
 import { motion } from 'framer-motion';
 import { ArrowRight, MemoryStick, ShieldAlert } from 'lucide-react';
-import { resolveConflict, safelyAvailable, SYSTEM_RAM, TOTAL_RAM, useApp } from '../lib/store';
+import { footprint, resolveConflict, useApp } from '../lib/store';
 import { Button } from '../ui/Button';
 import { Modal } from '../ui/Overlay';
 import { Monogram } from '../ui/Layout';
@@ -9,23 +9,28 @@ import { StatusBadge } from '../ui/Status';
 export function RamConflictModal() {
   const conflict = useApp((s) => s.ramConflict);
   const servers = useApp((s) => s.servers);
-  const headroom = useApp((s) => s.settings.safetyHeadroom);
+  const memory = useApp((s) => s.memory);
+  const headroom = memory.headroom;
   const close = () => useApp.setState({ ramConflict: null });
   const target = conflict ? servers.find((s) => s.id === conflict.serverId) : null;
-  const blockers = servers.filter((s) => s.id !== target?.id && (s.status === 'running' || s.status === 'starting'));
-  const blocker = blockers.sort((a, b) => b.ramAlloc - a.ramAlloc)[0];
-  const avail = target ? safelyAvailable(servers, target.id) : 0;
-  const shortfall = target ? +(target.ramAlloc - avail).toFixed(1) : 0;
+  const blockers = conflict?.blockers
+    ? conflict.blockers.map((id) => servers.find((s) => s.id === id)).filter((s): s is NonNullable<typeof s> => !!s)
+    : servers.filter((s) => s.id !== target?.id && (s.status === 'running' || s.status === 'starting')).sort((a, b) => b.ramAlloc - a.ramAlloc);
+  const blocker = blockers[0];
+  const required = conflict?.required ?? (target ? footprint(target) : 0);
+  const avail = conflict?.safe ?? memory.safeForNew;
+  const shortfall = conflict?.shortfall ?? +(required - avail).toFixed(1);
+  const TOTAL_RAM = memory.total || 16;
 
-  // Projected bar segments (GB)
+  // Projected bar segments (GB): what stays reserved if nothing is stopped
   const segs = target
     ? [
-        { label: 'System', v: SYSTEM_RAM, c: '#4b4e56' },
-        ...blockers.map((b) => ({ label: b.name, v: b.ramAlloc, c: '#8D97B0' })),
+        { label: 'System', v: memory.system, c: '#4b4e56' },
+        ...blockers.map((b) => ({ label: b.name, v: Math.max(footprint(b), b.ramUsed), c: '#8D97B0' })),
         { label: 'Safety headroom', v: headroom, c: 'pattern' },
       ]
     : [];
-  const usedBefore = segs.reduce((a, s) => a + s.v, 0);
+  const usedBefore = Math.min(TOTAL_RAM, segs.reduce((a, s) => a + s.v, 0));
 
   return (
     <Modal open={!!target} onClose={close} width={500}>
@@ -52,7 +57,7 @@ export function RamConflictModal() {
               <span className="flex items-center gap-1.5 text-fg-3">
                 <MemoryStick size={12} /> Physical memory
               </span>
-              <span className="num text-fg-3">{TOTAL_RAM} GB</span>
+              <span className="num text-fg-3">{TOTAL_RAM.toFixed(1)} GB</span>
             </div>
             <div className="relative flex h-3 w-full gap-[2px] overflow-hidden rounded-[3px] bg-white/[0.04]">
               {segs.map((s, i) => (
@@ -69,7 +74,7 @@ export function RamConflictModal() {
               ))}
               <motion.div
                 initial={{ width: 0 }}
-                animate={{ width: `${(target.ramAlloc / TOTAL_RAM) * 100}%` }}
+                animate={{ width: `${(Math.min(required, TOTAL_RAM - usedBefore + shortfall) / TOTAL_RAM) * 100}%` }}
                 transition={{ duration: 0.7, delay: 0.4, ease: [0.22, 1, 0.36, 1] }}
                 className="absolute top-0 h-full rounded-r-[3px] bg-red/70 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.15)]"
                 style={{ left: `${(usedBefore / TOTAL_RAM) * 100}%` }}
@@ -83,7 +88,7 @@ export function RamConflictModal() {
             </div>
 
             <div className="mt-3.5 grid grid-cols-3 divide-x divide-line-2 border-t border-line-2 pt-3">
-              <Fig label={`${target.name} requests`} value={`${target.ramAlloc} GB`} />
+              <Fig label={`${target.name} needs`} value={`${required.toFixed(1)} GB`} />
               <Fig label="Safely available" value={`${avail} GB`} tone="text-amber" />
               <Fig label="Shortfall" value={`${shortfall} GB`} tone="text-red" />
             </div>
@@ -97,7 +102,7 @@ export function RamConflictModal() {
                   {blocker.name} <StatusBadge status={blocker.status} />
                 </div>
                 <div className="num text-xs text-fg-3">
-                  Using {blocker.ramUsed} GB of {blocker.ramAlloc} GB · {blocker.players.length} player{blocker.players.length === 1 ? '' : 's'} online
+                  Using {blocker.ramUsed.toFixed(1)} GB · heap up to {blocker.ramAlloc} GB · {blocker.players.length} player{blocker.players.length === 1 ? '' : 's'} online
                 </div>
               </div>
               <ArrowRight size={14} className="text-fg-4" />
@@ -106,7 +111,7 @@ export function RamConflictModal() {
           )}
           {blocker && blocker.players.length > 0 && (
             <p className="mx-5 mt-2 text-xs text-fg-3">
-              {blocker.players.length} player{blocker.players.length === 1 ? '' : 's'} will be disconnected. The world is saved and backed up before shutdown.
+              {blocker.players.length} player{blocker.players.length === 1 ? '' : 's'} will be disconnected. The world is saved before shutdown.
             </p>
           )}
 

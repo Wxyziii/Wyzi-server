@@ -12,7 +12,9 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { navigate, type Route } from '../lib/router';
-import { memoryBreakdown, TOTAL_RAM, useApp } from '../lib/store';
+import { memoryBreakdown, useApp } from '../lib/store';
+import { fmtUptime } from '../lib/format';
+import { useUptime } from '../lib/hooks';
 import { cx } from '../lib/format';
 import { Dot, StatusDot } from '../ui/Status';
 import { Tooltip } from '../ui/Tooltip';
@@ -34,8 +36,14 @@ export function Sidebar({ route, collapsed }: { route: Route; collapsed: boolean
   const playit = useApp((s) => s.playit);
   const job = useApp((s) => s.backupJob);
   const running = servers.filter((s) => s.status === 'running').length;
-  const mem = memoryBreakdown(servers, sys.cache);
-  const ramPct = ((mem.used + mem.cache) / TOTAL_RAM) * 100;
+  const memory = useApp((s) => s.memory);
+  const host = useApp((s) => s.host);
+  const conn = useApp((s) => s.conn);
+  const uptime = useUptime();
+  const mem = memoryBreakdown(memory);
+  const ramPct = (Math.max(0, mem.total - memory.available) / mem.total) * 100;
+  const online = conn.state === 'online';
+  const machine = (host?.hostname ?? 'server').toUpperCase();
 
   const Item = ({ id, label, icon: Icon, badge }: { id: Route['page']; label: string; icon: LucideIcon; badge?: React.ReactNode }) => {
     const active = route.page === id;
@@ -161,9 +169,9 @@ export function Sidebar({ route, collapsed }: { route: Route; collapsed: boolean
 
       {/* machine identity */}
       {collapsed ? (
-        <Tooltip content="WYZI-SERVER · Online" side="right" className="mt-2 flex justify-center">
+        <Tooltip content={`${machine} · ${online ? 'Online' : 'Unreachable'}`} side="right" className="mt-2 flex justify-center">
           <div className="flex h-9 w-9 items-center justify-center rounded-md border border-line-2 bg-s-1">
-            <Dot tone="mint" pulse size={7} />
+            <Dot tone={online ? 'mint' : 'amber'} pulse={online} size={7} />
           </div>
         </Tooltip>
       ) : (
@@ -172,10 +180,12 @@ export function Sidebar({ route, collapsed }: { route: Route; collapsed: boolean
           className="mt-2 rounded-lg border border-line-2 bg-gradient-to-b from-s-2 to-s-1 p-2.5 text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] transition-colors hover:border-line-3"
         >
           <div className="flex items-center gap-2">
-            <Dot tone="mint" pulse size={6} />
-            <span className="font-mono text-[11px] font-medium tracking-wide text-fg">WYZI-SERVER</span>
+            <Dot tone={online ? 'mint' : 'amber'} pulse={online} size={6} />
+            <span className="font-mono text-[11px] font-medium tracking-wide text-fg">{machine}</span>
           </div>
-          <div className="mt-1 pl-[14px] text-2xs text-fg-3">Debian 12 · Online · 12d 4h</div>
+          <div className="mt-1 pl-[14px] text-2xs text-fg-3">
+            {host?.osShort ?? '—'} · {online ? 'Online' : conn.state === 'connecting' ? 'Connecting' : 'Unreachable'} · {fmtUptime(uptime)}
+          </div>
           <div className="mt-2.5 grid grid-cols-2 gap-2 pl-[14px]">
             <MiniBar label="CPU" pct={sys.cpu} />
             <MiniBar label="RAM" pct={ramPct} />

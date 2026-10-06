@@ -36,6 +36,8 @@ export const statusMeta: Record<ServerStatus, { label: string; tone: Tone }> = {
   stopping: { label: 'Stopping', tone: 'amber' },
   sleeping: { label: 'Sleeping', tone: 'blue' },
   offline: { label: 'Offline', tone: 'neutral' },
+  failed: { label: 'Failed', tone: 'red' },
+  undeployed: { label: 'Planned', tone: 'neutral' },
 };
 
 export function Dot({ tone, pulse, size = 7 }: { tone: Tone; pulse?: boolean; size?: number }) {

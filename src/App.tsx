@@ -1,13 +1,15 @@
 import { useEffect, useState } from 'react';
 import { AnimatePresence, motion, MotionConfig } from 'framer-motion';
 import { useRoute } from './lib/router';
-import { startSimulation, useApp } from './lib/store';
+import { startDataSource, useApp } from './lib/store';
 import { Sidebar } from './shell/Sidebar';
 import { Topbar } from './shell/Topbar';
 import { RamConflictModal } from './shell/RamConflict';
+import { RestoreDialog } from './shell/RestoreDialog';
 import { CommandPalette } from './shell/CommandPalette';
 import { MenuHost } from './ui/Menu';
 import { Toaster } from './ui/Overlay';
+import { ConnectionBanner } from './shell/ConnectionBanner';
 import { Dashboard } from './pages/Dashboard';
 import { Servers } from './pages/Servers';
 import { ServerDetail } from './pages/detail/ServerDetail';
@@ -26,7 +28,7 @@ export default function App() {
   const [manual, setManual] = useState<boolean | null>(null);
   const collapsed = manual ?? narrow;
 
-  useEffect(() => startSimulation(), []);
+  useEffect(() => startDataSource(), []);
   useEffect(() => {
     const on = () => setNarrow(window.innerWidth < 1100);
     window.addEventListener('resize', on);
@@ -74,6 +76,7 @@ export default function App() {
             {/* faint top sheen on the workspace */}
             <div className="pointer-events-none absolute inset-x-0 top-0 z-0 h-48 bg-[radial-gradient(ellipse_80%_100%_at_50%_0%,rgba(140,160,200,0.03),transparent)]" />
             <Topbar route={route} onToggle={() => setManual(!collapsed)} />
+            <ConnectionBanner />
             <div id="scroll" className="relative z-[1] min-h-0 flex-1 overflow-y-auto">
               <AnimatePresence mode="wait" initial={false}>
                 <motion.div
@@ -91,6 +94,7 @@ export default function App() {
           </main>
         </div>
         <RamConflictModal />
+        <RestoreDialog />
         <CommandPalette />
         <Toaster />
       </MenuHost>

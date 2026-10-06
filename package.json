@@ -1,11 +1,13 @@
 {
   "name": "wyzi-server",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:live": "vite --mode live",
     "build": "tsc -b && vite build",
+    "build:mock": "tsc -b && vite build --mode mock",
     "preview": "vite preview"
   },
   "dependencies": {
