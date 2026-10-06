@@ -1,0 +1,127 @@
+#!/usr/bin/env python3
+"""Wyzi Playit status bridge.
+
+Runs as a transient DynamicUser with SupplementaryGroups=playit (wyzi-playit-status.service).
+Asks the local playitd for its status/state using ONLY the read-only IPC requests
+`get_status` and `get_state`, and writes a sanitized JSON file that the web portal reads:
+
+    /run/wyzi-playit/status.json   (0644)
+
+Never written: agent secret, secret path, agent id, login links, account data, notices.
+The portal itself never connects to the Playit control socket.
+"""
+import json
+import os
+import socket
+import subprocess
+import sys
+import tempfile
+import time
+
+SOCKET = "/run/playit/playitd.sock"
+OUT_DIR = os.environ.get("RUNTIME_DIRECTORY", "/run/wyzi-playit")
+OUT = os.path.join(OUT_DIR, "status.json")
+READ_ONLY_REQUESTS = ("get_status", "get_state")
+
+
+def ipc(request_type: str) -> dict:
+    assert request_type in READ_ONLY_REQUESTS
+    s = socket.socket(socket.AF_UNIX)
+    s.settimeout(5)
+    s.connect(SOCKET)
+    f = s.makefile("rwb")
+    f.readline()  # hello
+    f.write(json.dumps({"ipc_version": 2, "request_id": 1, "request": {"type": request_type}}).encode() + b"\n")
+    f.flush()
+    msg = json.loads(f.readline())
+    s.close()
+    return msg.get("data", {}).get("response", {}).get("data", {}) or {}
+
+
+def srv_port(host: str) -> int | None:
+    try:
+        out = subprocess.run(
+            ["resolvectl", "query", "-t", "SRV", "--legend=no", f"_minecraft._tcp.{host}"],
+            capture_output=True, text=True, timeout=8,
+        ).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    for line in out.splitlines():
+        parts = line.split()
+        if "SRV" in parts:
+            i = parts.index("SRV")
+            try:
+                return int(parts[i + 3])
+            except (IndexError, ValueError):
+                return None
+    return None
+
+
+def tcp_rtt_ms(host: str, port: int) -> int | None:
+    best = None
+    for _ in range(1):  # one probe per run: each probe is a real connection through the tunnel
+        t = time.monotonic()
+        try:
+            with socket.create_connection((host, port), timeout=3):
+                pass
+        except OSError:
+            continue
+        ms = (time.monotonic() - t) * 1000
+        best = ms if best is None else min(best, ms)
+    return round(best) if best is not None else None
+
+
+def main() -> int:
+    out = {"updated_at": time.time(), "agent": "offline", "version": None, "tunnels": [], "latency_ms": None}
+    try:
+        status = ipc("get_status")
+        state = ipc("get_state")
+    except (OSError, ValueError) as e:
+        out["error"] = f"playitd unreachable ({e.__class__.__name__})"
+        write(out)
+        return 0
+
+    phase = status.get("phase")
+    inner = state.get("data") or {}
+    out["version"] = status.get("version")
+    out["phase"] = phase
+    if not status.get("has_secret"):
+        out["agent"] = "not_paired"
+    elif phase == "running" and state.get("state") == "running":
+        out["agent"] = "online"
+    else:
+        out["agent"] = "connecting"
+    out["account_verified"] = inner.get("account_status") == "verified"
+    out["pending_tunnels"] = len(inner.get("pending_tunnels") or [])
+
+    for t in inner.get("tunnels") or []:
+        display = str(t.get("display_address") or "")
+        host, _, port = display.partition(":")
+        port_n = int(port) if port.isdigit() else srv_port(host) if host else None
+        out["tunnels"].append({
+            "public_host": host or None,
+            "public_port": port_n,
+            "public_address": f"{host}:{port_n}" if host and port_n else host or None,
+            "srv": bool(host and not port and port_n),
+            "local_target": str(t.get("destination") or "") or None,
+            "disabled": bool(t.get("is_disabled")),
+        })
+
+    main_t = next((t for t in out["tunnels"] if t["public_host"] and t["public_port"]), None)
+    if main_t and out["agent"] == "online":
+        out["latency_ms"] = tcp_rtt_ms(main_t["public_host"], main_t["public_port"])
+    write(out)
+    return 0
+
+
+def write(data: dict) -> None:
+    os.makedirs(OUT_DIR, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=OUT_DIR, prefix=".status.")
+    with os.fdopen(fd, "w") as f:
+        json.dump(data, f)
+    os.chmod(tmp, 0o644)
+    os.replace(tmp, OUT)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
