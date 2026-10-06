@@ -90,6 +90,7 @@ class Instance:
         self.cpu = 0.0
         self.started_at: float | None = None
         self.pending: str | None = None  # 'starting' | 'stopping' while a helper call is in flight
+        self.reported_status = "offline"  # last status events were emitted for (ready flips between polls)
         self.pending_since = 0.0
         self.start_step = 0
         self.done_seen = False
@@ -337,7 +338,7 @@ class InstanceManager:
             return
         units = await self._show_units([i.service for i in self.instances.values()])
         for inst in self.instances.values():
-            prev_state, prev_status = inst.active_state, inst.status
+            prev_state, prev_status = inst.active_state, inst.reported_status
             inst.unit = units.get(inst.service, {})
             self._update_process(inst)
             self._transitions(inst, prev_state, prev_status)
@@ -427,6 +428,7 @@ class InstanceManager:
             hub.log("system", "info", f"{inst.service} ready{f' after {took:.1f}s' if took else ''}")
             hub.toast(f"{inst.name} is running", "success", f"Listening on port {inst.port}")
             inst.console.push("sys", f"Ready · accepting players on port {inst.port}")
+        inst.reported_status = inst.status
 
     def _record(self, inst: Instance) -> None:
         if inst.status in ("running", "starting", "stopping"):

@@ -1,0 +1,21 @@
+#!/bin/bash
+# ExecStop for wyzi-mc@.service: ask the server to stop via RCON and wait until it has exited.
+# If RCON is unavailable we return immediately and systemd sends SIGTERM, which Minecraft
+# also handles gracefully (shutdown hook saves worlds).
+set -uo pipefail
+inst=$1 pid=${2:-}
+timeout=${STOP_TIMEOUT:-240}
+
+[[ -n $pid ]] && kill -0 "$pid" 2>/dev/null || exit 0
+
+if /opt/wyzi-server/bin/wyzi-rcon "$inst" stop >/dev/null 2>&1; then
+  echo "wyzi-mc-stop: sent RCON stop to $inst (pid $pid), waiting up to ${timeout}s"
+  for ((i = 0; i < timeout; i++)); do
+    kill -0 "$pid" 2>/dev/null || { echo "wyzi-mc-stop: $inst exited cleanly"; exit 0; }
+    sleep 1
+  done
+  echo "wyzi-mc-stop: $inst still running after ${timeout}s; systemd will send SIGTERM" >&2
+else
+  echo "wyzi-mc-stop: RCON unavailable for $inst; falling back to SIGTERM"
+fi
+exit 0

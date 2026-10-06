@@ -1,0 +1,39 @@
+#!/bin/bash
+# Mutual-exclusion guard for heavy game servers. Runs as root from ExecStartPre=+.
+#   wyzi-exclusive mc <instance>  - Minecraft has priority: gracefully stop any running ARK slot;
+#                                   refuse if another HEAVY=yes Minecraft instance is running.
+#   wyzi-exclusive ark            - refuse to start ARK while any Minecraft instance is running.
+set -euo pipefail
+
+active() { systemctl list-units --state=active,activating,reloading --no-legend --plain "$1" | awk '{print $1}'; }
+is_heavy() { grep -qE '^HEAVY="?yes"?\s*$' "/etc/wyzi-server/instances/$1.env" 2>/dev/null; }
+
+case "${1:-}" in
+  mc)
+    inst=${2:?instance}
+    ark=$(active 'ark-server@*.service')
+    if [[ -n $ark ]]; then
+      echo "wyzi-exclusive: Minecraft '$inst' has priority; stopping ARK gracefully: $ark"
+      # shellcheck disable=SC2086
+      systemctl stop $ark
+    fi
+    if is_heavy "$inst"; then
+      for u in $(active 'wyzi-mc@*.service'); do
+        other=${u#wyzi-mc@}; other=${other%.service}
+        [[ $other == "$inst" ]] && continue
+        if is_heavy "$other"; then
+          echo "wyzi-exclusive: refusing to start '$inst': heavy instance '$other' is already running" >&2
+          exit 1
+        fi
+      done
+    fi
+    ;;
+  ark)
+    mc=$(active 'wyzi-mc@*.service')
+    if [[ -n $mc ]]; then
+      echo "wyzi-exclusive: refusing to start ARK while Minecraft is running: $mc" >&2
+      exit 1
+    fi
+    ;;
+  *) echo "usage: wyzi-exclusive mc <instance> | ark" >&2; exit 64 ;;
+esac

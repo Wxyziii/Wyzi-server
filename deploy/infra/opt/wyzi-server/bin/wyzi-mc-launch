@@ -1,0 +1,35 @@
+#!/bin/bash
+# Launch a Minecraft server from the environment provided by wyzi-mc@.service
+# (/etc/wyzi-server/instances/<name>.env). Runs as the minecraft user; exec's Java.
+set -euo pipefail
+
+die() { echo "wyzi-mc-launch: $*" >&2; exit 64; }
+
+: "${WYZI_INSTANCE:?not started via wyzi-mc@.service}"
+: "${JAVA:?JAVA not set in instance env}"
+: "${XMX:?XMX not set in instance env}"
+XMS=${XMS:-$XMX}
+
+[[ $JAVA =~ ^/usr/lib/jvm/[A-Za-z0-9._-]+/bin/java$ ]] || die "JAVA must be /usr/lib/jvm/<jdk>/bin/java (got '$JAVA')"
+[[ -x $JAVA ]] || die "JAVA not executable: $JAVA"
+[[ $XMS =~ ^[0-9]+[MG]$ && $XMX =~ ^[0-9]+[MG]$ ]] || die "XMS/XMX must look like 4096M or 6G"
+
+read -r -a jvm_flags   <<< "${JVM_FLAGS:-}"
+read -r -a server_args <<< "${SERVER_ARGS:-nogui}"
+
+echo "wyzi-mc-launch: instance=$WYZI_INSTANCE java=$JAVA heap=$XMS..$XMX mode=${LAUNCH_MODE:-jar}"
+
+case "${LAUNCH_MODE:-jar}" in
+  jar)
+    : "${SERVER_JAR:?SERVER_JAR not set}"
+    [[ $SERVER_JAR != */* && -f $SERVER_JAR ]] || die "SERVER_JAR must be a file in the instance dir (got '$SERVER_JAR')"
+    exec "$JAVA" "-Xms$XMS" "-Xmx$XMX" "${jvm_flags[@]}" -jar "$SERVER_JAR" "${server_args[@]}"
+    ;;
+  args)
+    # Forge/NeoForge style: LAUNCH_ARGS="@libraries/net/neoforged/neoforge/<ver>/unix_args.txt"
+    : "${LAUNCH_ARGS:?LAUNCH_ARGS not set}"
+    read -r -a launch_args <<< "$LAUNCH_ARGS"
+    exec "$JAVA" "-Xms$XMS" "-Xmx$XMX" "${jvm_flags[@]}" "${launch_args[@]}" "${server_args[@]}"
+    ;;
+  *) die "LAUNCH_MODE must be 'jar' or 'args'" ;;
+esac

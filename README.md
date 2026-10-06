@@ -1,28 +1,83 @@
-# WYZI Server — frontend prototype
+# WYZI Server
 
-Clickable, high-fidelity prototype of a local-only home server portal (Minecraft hosting).
-All data is simulated in the browser; nothing is executed on any machine.
+Local-only management portal for a home Minecraft server (Ubuntu, systemd, Playit.gg).
+React + TypeScript + Vite + Tailwind + Framer Motion + Lucide frontend, FastAPI backend,
+SQLite for settings, WebSockets for live data.
 
-## Run
+The portal is **LAN-only** (`http://192.168.1.2:8080`). It is never exposed through Playit,
+Cloudflare or port forwarding.
 
-    npm install
-    npm run dev        # http://localhost:5173
+## Two modes
 
-## Things to try
+| | Prototype mode | Server-connected (production) mode |
+|---|---|---|
+| Data | simulated in the browser (`src/lib/mock.ts`) | real host + instances from the FastAPI backend |
+| Actions | animated fakes, nothing executes | start/stop/restart, RCON console, backups, restore |
+| Start | `npm run dev` | `npm run build` → served by FastAPI on :8080 |
+| When the backend is down | n/a | explicit "Server unreachable" banner, never fake data |
 
-- Dashboard → **Wake** Cobblemon while Prominence II runs → memory-safety dialog → swap servers
-- Start **Vanilla** (2 GB fits) → animated startup sequence → Running
-- Server detail → **Console** tab → `say test`, `list`, `tps`, `help`, `stop` (↑ for history, Tab to complete)
-- Right-click any server row, backup row, player or file for context menus
-- **Backups** → Create backup → live progress
-- **Network** → Copy Address (real clipboard) / Restart Tunnel
-- **Settings** → Compact mode and Animations actually apply; memory headroom changes what's "safe"
-- Search button / Ctrl K → command palette · Ctrl B → collapse sidebar
+The mode is chosen at build time with `VITE_WYZI_MODE` (`mock` / `live`). Production builds default
+to `live`; `npm run dev` defaults to `mock`.
 
-## Structure
+## Frontend development
 
-- `src/index.css` — design tokens (colors, type scale, radii, shadows, surfaces)
+```bash
+npm install
+npm run dev          # prototype mode, http://localhost:5173
+npm run dev:live     # live mode against a backend (proxy /api + WebSocket)
+```
+
+`dev:live` proxies to `WYZI_BACKEND` (default `http://127.0.0.1:8081`). To use the real server,
+run a development backend there and tunnel it:
+
+```bash
+ssh -N -L 8081:127.0.0.1:8081 marceserver
+```
+
+Structure:
+
+- `src/index.css` — design tokens (graphite base, slate-blue accent, green only for healthy states)
 - `src/ui/` — custom primitives: Button, Status, Tooltip, Menu, Controls, Charts, Overlay, Layout
-- `src/shell/` — sidebar, top bar, command palette, RAM-conflict modal
+- `src/shell/` — sidebar, top bar, command palette, RAM-conflict modal, restore dialog, connection banner
 - `src/pages/` — Dashboard, Servers, server detail tabs, Storage, Backups, Network, System, Logs, Settings
-- `src/lib/store.ts` — mock data, fake actions and the live simulation loop
+- `src/lib/types.ts` — shared data models (same shapes from mock and backend)
+- `src/lib/store.ts` — the single app store (`useApp`) and the action facade (mock or live)
+- `src/lib/live.ts` — REST snapshot + WebSocket stream + real actions
+- `src/lib/mock.ts`, `mockData.ts` — the prototype simulation
+- `src/lib/api.ts` — fetch wrapper (adds the `X-Wyzi` header the backend requires)
+
+UI components only talk to the store, never to the transport.
+
+## Backend development
+
+```bash
+cd backend
+python -m venv .venv && .venv/Scripts/pip install -r requirements-dev.txt   # Windows
+python -m pytest -q
+```
+
+The backend reads Linux paths (`/proc`, `/sys`, `/etc/wyzi-server`, `/srv/minecraft`), so it runs
+on the server. Every path can be overridden with an environment variable (see `backend/app/config.py`).
+`WYZI_HELPER_ENABLED=0` runs it without the privileged helper (development as a normal user).
+
+## Deployment
+
+```bash
+deploy/deploy-portal.sh            # build + upload + restart, as your normal user (no sudo)
+```
+
+One-time / when units change, on the server:
+
+```bash
+sudo bash deploy/install-root.sh
+```
+
+See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+
+## Documentation
+
+- [docs/API.md](docs/API.md) — REST + WebSocket API
+- [docs/SECURITY.md](docs/SECURITY.md) — privilege model, LAN guard, what the portal can and cannot do
+- [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) — server layout, install, deploy, rollback
+- [docs/INSTANCES.md](docs/INSTANCES.md) — Minecraft instance configuration, RAM safety, backups
+- [docs/PLAYIT.md](docs/PLAYIT.md) — the sanitized Playit status bridge

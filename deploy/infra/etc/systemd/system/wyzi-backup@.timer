@@ -1,0 +1,12 @@
+# Schedule is a placeholder until the real Cobbleverse instance is profiled.
+# Override per instance: systemctl edit wyzi-backup@<instance>.timer
+[Unit]
+Description=Wyzi scheduled backup timer for %i
+
+[Timer]
+OnCalendar=*-*-* 04:30:00
+RandomizedDelaySec=10min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

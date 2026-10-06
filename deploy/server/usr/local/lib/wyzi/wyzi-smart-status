@@ -1,0 +1,53 @@
+#!/usr/bin/env python3
+"""Wyzi SMART status export (runs as root from wyzi-smart-status.service, hourly).
+
+Writes a sanitized summary to /run/wyzi-smart/status.json (0644) so the unprivileged
+portal can show disk health. Serial numbers / WWNs are deliberately not exported."""
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import time
+
+OUT_DIR = os.environ.get("RUNTIME_DIRECTORY", "/run/wyzi-smart")
+ATTR = {5: "reallocated", 197: "pending", 198: "offline_uncorrectable", 199: "udma_crc_errors"}
+
+
+def disks() -> list[str]:
+    return sorted(d for d in os.listdir("/sys/block") if not d.startswith(("loop", "ram", "zram", "dm-", "sr")))
+
+
+def probe(dev: str) -> dict:
+    try:
+        raw = subprocess.run(["smartctl", "-j", "-H", "-A", "-i", f"/dev/{dev}"], capture_output=True, text=True, timeout=60).stdout
+        data = json.loads(raw)
+    except (OSError, ValueError, subprocess.TimeoutExpired) as e:
+        return {"error": e.__class__.__name__}
+    out = {
+        "model": data.get("model_name"),
+        "capacity_bytes": (data.get("user_capacity") or {}).get("bytes"),
+        "rotation_rate": data.get("rotation_rate"),
+        "passed": (data.get("smart_status") or {}).get("passed"),
+        "temperature": (data.get("temperature") or {}).get("current"),
+        "power_on_hours": (data.get("power_on_time") or {}).get("hours"),
+    }
+    for a in (data.get("ata_smart_attributes") or {}).get("table", []):
+        if a.get("id") in ATTR:
+            out[ATTR[a["id"]]] = (a.get("raw") or {}).get("value")
+    return out
+
+
+def main() -> int:
+    result = {"updated_at": time.time(), "disks": {d: probe(d) for d in disks()}}
+    os.makedirs(OUT_DIR, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=OUT_DIR, prefix=".status.")
+    with os.fdopen(fd, "w") as f:
+        json.dump(result, f)
+    os.chmod(tmp, 0o644)
+    os.replace(tmp, os.path.join(OUT_DIR, "status.json"))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

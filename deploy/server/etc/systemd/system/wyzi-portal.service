@@ -1,0 +1,43 @@
+# Wyzi Server Portal backend (FastAPI + WebSockets, serves the built frontend on :8080).
+# LAN-only exposure is enforced by UFW (8080/tcp from 192.168.1.0/24) and the app's Host check.
+# Binding 0.0.0.0 keeps it working unchanged when the server moves from Wi-Fi to Ethernet.
+[Unit]
+Description=Wyzi Server Portal (FastAPI)
+Documentation=file:///opt/wyzi-server/docs/PORTAL_ENVIRONMENT.md
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=10min
+StartLimitBurst=10
+
+[Service]
+Type=exec
+User=wyziportal
+Group=wyziportal
+WorkingDirectory=/opt/wyzi-server/portal/backend
+Environment=WYZI_PORTAL_DATA=/opt/wyzi-server/portal/data
+Environment=WYZI_PORTAL_FRONTEND=/opt/wyzi-server/portal/frontend/dist
+Environment=WYZI_PORTAL_PORT=8080
+EnvironmentFile=-/etc/wyzi-server/portal.env
+ExecStart=/opt/wyzi-server/portal/backend/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8080 --no-server-header --log-level warning
+# exit code 3 = deploy-portal.sh requested a restart (data/restart-request)
+Restart=on-failure
+RestartSec=2
+SyslogIdentifier=wyzi-portal
+
+# The portal reaches root ONLY through: sudo -n /usr/local/sbin/wyzi-helper <action>.
+# sudo needs NoNewPrivileges=no, and helper children (restore) inherit this mount
+# namespace, so the filesystem is protected with ProtectSystem=full (+ normal permissions).
+NoNewPrivileges=no
+PrivateTmp=yes
+ProtectSystem=full
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+LockPersonality=yes
+MemoryHigh=384M
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target

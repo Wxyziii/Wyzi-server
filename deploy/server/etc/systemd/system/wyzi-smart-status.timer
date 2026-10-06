@@ -1,0 +1,10 @@
+[Unit]
+Description=Export SMART status hourly
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1h
+RandomizedDelaySec=2min
+
+[Install]
+WantedBy=timers.target

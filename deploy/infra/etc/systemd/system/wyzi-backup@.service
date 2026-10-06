@@ -1,0 +1,22 @@
+# Scheduled backup of Minecraft instance %i (label "scheduled").
+# Trigger with the matching timer: systemctl enable --now wyzi-backup@<instance>.timer
+[Unit]
+Description=Wyzi scheduled backup of Minecraft instance %i
+Documentation=file:///opt/wyzi-server/docs/MINECRAFT_DEPLOYMENT.md
+RequiresMountsFor=/srv/storage /srv/minecraft
+AssertPathExists=/etc/wyzi-server/instances/%i.env
+
+[Service]
+Type=oneshot
+User=minecraft
+Group=minecraft
+UMask=0027
+ExecStart=/opt/wyzi-server/bin/wyzi-backup %i scheduled
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+SyslogIdentifier=backup-%i
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ProtectHome=yes

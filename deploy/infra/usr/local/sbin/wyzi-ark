@@ -1,0 +1,19 @@
+#!/bin/bash
+# Manual on/off switch for the ARK cluster (disabled at boot by design).
+#   sudo wyzi-ark start [slot]   default slot: home  (refused while any Minecraft instance runs)
+#   sudo wyzi-ark stop           stops all ARK slots + manager + discord bot
+#   wyzi-ark status
+set -euo pipefail
+slot=${2:-home}
+[[ $slot =~ ^[a-z0-9-]+$ ]] || { echo "invalid slot" >&2; exit 64; }
+case "${1:-status}" in
+  start)
+    /usr/local/sbin/wyzi-exclusive ark
+    systemctl start ark-cluster-manager.service "ark-server@$slot.service" ark-cluster-discord-bot.service ;;
+  stop)
+    # shellcheck disable=SC2046
+    systemctl stop ark-cluster-discord-bot.service $(systemctl list-units --no-legend --plain 'ark-server@*.service' | awk '{print $1}') ark-cluster-manager.service ;;
+  status)
+    systemctl list-units --all --no-legend --plain 'ark-*' ;;
+  *) echo "usage: wyzi-ark start [slot] | stop | status" >&2; exit 64 ;;
+esac

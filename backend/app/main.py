@@ -59,9 +59,24 @@ async def sample_loop() -> None:
         await asyncio.sleep(max(0.2, config.SAMPLE_INTERVAL - (time.monotonic() - t)))
 
 
+STARTED_AT = time.time()
+
+
+def _restart_requested() -> bool:
+    """deploy-portal.sh touches data/restart-request after copying new code; exiting with
+    code 3 makes systemd (Restart=on-failure) start the new version. No sudo needed."""
+    try:
+        return (config.DATA_DIR / "restart-request").stat().st_mtime > STARTED_AT
+    except OSError:
+        return False
+
+
 async def slow_loop() -> None:
     prev_agent = None
     while True:
+        if _restart_requested():
+            log.warning("restart requested by deploy; exiting with code 3")
+            os._exit(3)
         try:
             listening = {i.port for i in manager.instances.values() if i.status == "running"}
             p = await playit_status(listening)

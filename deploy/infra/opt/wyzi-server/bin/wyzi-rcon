@@ -1,0 +1,85 @@
+#!/usr/bin/env python3
+"""Minimal RCON client for Wyzi Minecraft instances.
+
+Usage: wyzi-rcon <instance> <command...>
+
+Reads enable-rcon / rcon.port / rcon.password / server-ip from
+/srv/minecraft/instances/<instance>/server.properties. Connects to localhost
+unless server-ip pins a specific address.
+"""
+import re
+import socket
+import struct
+import sys
+from pathlib import Path
+
+INSTANCES = Path("/srv/minecraft/instances")
+NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}$")
+
+
+def read_props(path: Path) -> dict:
+    props = {}
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        k, v = line.split("=", 1)
+        props[k.strip()] = v.strip()
+    return props
+
+
+def packet(req_id: int, ptype: int, body: str) -> bytes:
+    payload = struct.pack("<ii", req_id, ptype) + body.encode("utf-8") + b"\x00\x00"
+    return struct.pack("<i", len(payload)) + payload
+
+
+def recv_packet(sock: socket.socket):
+    def recv_exact(n):
+        buf = b""
+        while len(buf) < n:
+            chunk = sock.recv(n - len(buf))
+            if not chunk:
+                raise ConnectionError("connection closed")
+            buf += chunk
+        return buf
+
+    (length,) = struct.unpack("<i", recv_exact(4))
+    data = recv_exact(length)
+    req_id, ptype = struct.unpack("<ii", data[:8])
+    return req_id, ptype, data[8:-2].decode("utf-8", errors="replace")
+
+
+def main() -> int:
+    if len(sys.argv) < 3 or not NAME_RE.match(sys.argv[1]):
+        print(__doc__.strip(), file=sys.stderr)
+        return 64
+    inst, command = sys.argv[1], " ".join(sys.argv[2:])
+    props = read_props(INSTANCES / inst / "server.properties")
+    if props.get("enable-rcon", "false").lower() != "true" or not props.get("rcon.password"):
+        print(f"wyzi-rcon: RCON not enabled for {inst}", file=sys.stderr)
+        return 69
+    host = props.get("server-ip") or "127.0.0.1"
+    port = int(props.get("rcon.port", "25575"))
+
+    with socket.create_connection((host, port), timeout=10) as s:
+        s.sendall(packet(1, 3, props["rcon.password"]))
+        req_id, _, _ = recv_packet(s)
+        if req_id == -1:
+            print("wyzi-rcon: authentication failed", file=sys.stderr)
+            return 77
+        s.sendall(packet(2, 2, command))
+        try:
+            _, _, body = recv_packet(s)
+        except (ConnectionError, socket.timeout):
+            body = ""  # e.g. "stop" may close the socket before replying
+    if body:
+        print(body)
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except (OSError, ConnectionError) as e:
+        print(f"wyzi-rcon: {e}", file=sys.stderr)
+        sys.exit(75)

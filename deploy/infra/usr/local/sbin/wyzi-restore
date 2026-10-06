@@ -1,0 +1,52 @@
+#!/bin/bash
+# Restore a Minecraft instance from a wyzi-backup archive. Runs as root.
+#   wyzi-restore <instance> <archive-file-name>
+# Nothing is deleted: the current instance directory is renamed to
+#   /srv/minecraft/instances/.<instance>.pre-restore-<timestamp>
+# and paths excluded from the backup (logs, libraries, ...) are copied back from it.
+set -euo pipefail
+
+die() { echo "wyzi-restore: $*" >&2; exit 1; }
+log() { echo "wyzi-restore: $*"; }
+
+inst=${1:-}; archive=${2:-}
+[[ $inst =~ ^[a-z0-9][a-z0-9-]{0,31}$ ]] || die "invalid instance name"
+[[ $archive =~ ^$inst-[0-9]{8}T[0-9]{6}Z-[a-z0-9-]+\.tar\.zst$ ]] || die "invalid archive name"
+
+parent=/srv/minecraft/instances
+src=/srv/storage/backups/minecraft/$inst/$archive
+envf=/etc/wyzi-server/instances/$inst.env
+[[ -f $src && -f $src.sha256 ]] || die "archive or checksum not found: $src"
+[[ -f $envf ]] || die "unknown instance '$inst'"
+systemctl is-active --quiet "wyzi-mc@$inst.service" && die "instance '$inst' is running - stop it first"
+
+log "verifying checksum"
+( cd "$(dirname "$src")" && sha256sum -c --quiet "$archive.sha256" ) || die "checksum mismatch"
+bad=$(tar --zstd -tf "$src" | grep -v -e "^$inst/" -e "^$inst\$" | head -n1 || true)
+[[ -z $bad ]] && ! tar --zstd -tf "$src" | grep -q '\.\./' || die "archive contains unexpected paths"
+
+ts=$(date -u +%Y%m%dT%H%M%SZ)
+keep=$parent/.$inst.pre-restore-$ts
+if [[ -d $parent/$inst ]]; then
+  mv "$parent/$inst" "$keep"
+  log "current instance moved to $keep"
+fi
+
+log "extracting $archive"
+tar --zstd -C "$parent" -xf "$src"
+
+excludes=$(sed -n 's/^BACKUP_EXCLUDES=//p' "$envf" | tail -n1 | tr -d "\"'")
+if [[ -d $keep ]]; then
+  for p in $excludes; do
+    if [[ -e $keep/$p && ! -e $parent/$inst/$p ]]; then
+      mkdir -p "$(dirname "$parent/$inst/$p")"
+      cp -a "$keep/$p" "$parent/$inst/$p"
+      log "carried over excluded path: $p"
+    fi
+  done
+fi
+
+chown -R minecraft:minecraft "$parent/$inst"
+chmod -R g+rwX,o-rwx "$parent/$inst"
+setfacl -R -m g:wyziportal:rX "$parent/$inst"
+log "restore complete. Previous state kept at: $keep"

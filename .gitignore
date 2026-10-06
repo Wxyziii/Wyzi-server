@@ -34,3 +34,4 @@ __pycache__/
 .pytest_cache/
 *.tsbuildinfo
 .claude/
+ops-notes/

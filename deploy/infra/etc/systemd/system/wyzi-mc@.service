@@ -1,0 +1,59 @@
+# Wyzi Minecraft instance template.
+#   Instance name  : %i  (must match ^[a-z0-9][a-z0-9-]{0,31}$)
+#   Server files   : /srv/minecraft/instances/%i/
+#   Instance config: /etc/wyzi-server/instances/%i.env   (Java, heap, flags, launch mode)
+#   Per-instance resource limits go in a drop-in:
+#     /etc/systemd/system/wyzi-mc@%i.service.d/limits.conf  (MemoryHigh=, MemoryMax=, CPUWeight=)
+# Docs: /opt/wyzi-server/docs/MINECRAFT_DEPLOYMENT.md
+
+[Unit]
+Description=Wyzi Minecraft instance %i
+Documentation=file:///opt/wyzi-server/docs/MINECRAFT_DEPLOYMENT.md
+After=network-online.target
+Wants=network-online.target
+AssertPathExists=/etc/wyzi-server/instances/%i.env
+AssertPathIsDirectory=/srv/minecraft/instances/%i
+# Crash-loop protection: at most 3 (re)starts per hour, then stay failed.
+StartLimitIntervalSec=1h
+StartLimitBurst=3
+
+[Service]
+Type=exec
+User=minecraft
+Group=minecraft
+UMask=0007
+EnvironmentFile=/etc/wyzi-server/instances/%i.env
+Environment=WYZI_INSTANCE=%i HOME=/srv/minecraft/instances/%i
+WorkingDirectory=/srv/minecraft/instances/%i
+
+# Root pre-check: Minecraft has priority over ARK; HEAVY=yes instances are mutually exclusive.
+ExecStartPre=+/usr/local/sbin/wyzi-exclusive mc %i
+ExecStart=/opt/wyzi-server/bin/wyzi-mc-launch
+# Graceful stop: RCON "stop" and wait for save; falls back to SIGTERM (vanilla shutdown hook also saves).
+ExecStop=/opt/wyzi-server/bin/wyzi-mc-stop %i $MAINPID
+
+Restart=on-failure
+RestartSec=30
+SuccessExitStatus=0 130 143
+TimeoutStartSec=6min
+TimeoutStopSec=5min
+KillSignal=SIGTERM
+SendSIGKILL=yes
+LimitNOFILE=65536
+MemoryAccounting=yes
+
+SyslogIdentifier=mc-%i
+StandardOutput=journal
+StandardError=journal
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+
+[Install]
+WantedBy=multi-user.target

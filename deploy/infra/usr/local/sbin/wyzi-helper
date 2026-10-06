@@ -1,0 +1,79 @@
+#!/bin/bash
+# Wyzi privileged helper - the ONLY root entry point for the web portal.
+# Allowed via /etc/sudoers.d/60-wyzi-portal:
+#   wyziportal ALL=(root) NOPASSWD: /usr/local/sbin/wyzi-helper
+# Every action and argument is validated against an explicit allow-list below.
+# The portal calls:  sudo -n /usr/local/sbin/wyzi-helper <action> [args]
+set -euo pipefail
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+die() { echo "wyzi-helper: $*" >&2; exit 64; }
+NAME_RE='^[a-z0-9][a-z0-9-]{0,31}$'
+
+need_instance() {
+  [[ ${1:-} =~ $NAME_RE ]] || die "invalid instance name"
+  [[ -f /etc/wyzi-server/instances/$1.env && -d /srv/minecraft/instances/$1 ]] || die "unknown instance '$1'"
+}
+lines_arg() {
+  local n=${1:-200}
+  [[ $n =~ ^[0-9]{1,4}$ ]] && (( n >= 1 && n <= 5000 )) || die "lines must be 1..5000"
+  echo "$n"
+}
+
+logger -t wyzi-helper -- "caller=${SUDO_USER:-$(id -un)} args=$*"
+
+action=${1:-}; shift || true
+case "$action" in
+  list)
+    for f in /etc/wyzi-server/instances/*.env; do
+      [[ -e $f ]] || continue
+      i=$(basename "$f" .env)
+      printf '%s\t%s\t%s\n' "$i" "$(systemctl is-active "wyzi-mc@$i.service" || true)" "$(systemctl is-enabled "wyzi-mc@$i.service" 2>/dev/null || true)"
+    done ;;
+  status)
+    need_instance "${1:-}"
+    systemctl show "wyzi-mc@$1.service" --no-pager \
+      -p ActiveState -p SubState -p MainPID -p ExecMainStartTimestamp -p NRestarts \
+      -p MemoryCurrent -p MemoryPeak -p CPUUsageNSec -p Result -p UnitFileState ;;
+  start|stop|restart)
+    need_instance "${1:-}"
+    systemctl reset-failed "wyzi-mc@$1.service" 2>/dev/null || true
+    systemctl "$action" "wyzi-mc@$1.service" ;;
+  enable|disable)
+    need_instance "${1:-}"
+    systemctl "$action" "wyzi-mc@$1.service" ;;
+  logs)
+    need_instance "${1:-}"
+    journalctl -u "wyzi-mc@$1.service" -n "$(lines_arg "${2:-200}")" --no-pager -o short-iso ;;
+  backup)
+    need_instance "${1:-}"
+    systemd-run --quiet --collect --unit="wyzi-backup-manual-$1-$(date -u +%Y%m%dT%H%M%S)" \
+      --uid=minecraft --gid=minecraft -p Nice=10 -p IOSchedulingClass=best-effort -p IOSchedulingPriority=7 \
+      /opt/wyzi-server/bin/wyzi-backup "$1" manual
+    echo "backup started" ;;
+  backups)
+    need_instance "${1:-}"
+    ls -1 --time-style=+%Y-%m-%dT%H:%M:%S -l "/srv/storage/backups/minecraft/$1" 2>/dev/null \
+      | awk '$NF ~ /\.tar\.zst$/ {print $6"\t"$5"\t"$NF}' ;;
+  backup-logs)
+    need_instance "${1:-}"
+    journalctl -t wyzi-backup -t "backup-$1" -n "$(lines_arg "${2:-100}")" --no-pager -o short-iso ;;
+  restore)
+    need_instance "${1:-}"
+    [[ ${2:-} =~ ^$1-[0-9]{8}T[0-9]{6}Z-[a-z0-9-]+\.tar\.zst$ ]] || die "invalid archive name"
+    /usr/local/sbin/wyzi-restore "$1" "$2" ;;
+  playit)
+    case "${1:-}" in
+      status)  systemctl show playit.service -p ActiveState -p SubState -p MainPID -p ExecMainStartTimestamp -p NRestarts --no-pager ;;
+      restart) systemctl restart playit.service ;;
+      logs)    journalctl -u playit.service -n "$(lines_arg "${2:-200}")" --no-pager -o short-iso ;;
+      *) die "playit: status|restart|logs" ;;
+    esac ;;
+  ark)
+    case "${1:-}" in
+      status) systemctl is-active ark-server@home.service ark-cluster-manager.service || true ;;
+      *) die "ark: status (start/stop is manual via wyzi-ark)" ;;
+    esac ;;
+  *)
+    die "unknown action. allowed: list status start stop restart enable disable logs backup backups backup-logs restore playit ark" ;;
+esac

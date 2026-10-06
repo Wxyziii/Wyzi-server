@@ -1,0 +1,30 @@
+# Sanitized Playit status for the web portal (read-only IPC: get_status/get_state).
+# Runs as the dedicated no-login account wyziplayit (only extra group: playit), never as the
+# portal user. Not DynamicUser: that would place the output under /run/private (0700).
+[Unit]
+Description=Wyzi Playit status bridge (sanitized, read-only)
+After=playit.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=wyziplayit
+Group=wyziplayit
+SupplementaryGroups=playit
+RuntimeDirectory=wyzi-playit
+RuntimeDirectoryMode=0755
+RuntimeDirectoryPreserve=yes
+UMask=0022
+ExecStart=/usr/local/lib/wyzi/wyzi-playit-status
+TimeoutStartSec=40
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LockPersonality=yes
+SystemCallArchitectures=native

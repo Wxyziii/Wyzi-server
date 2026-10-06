@@ -1,0 +1,91 @@
+#!/bin/bash
+# Back up one Minecraft instance to bulk storage.
+#   wyzi-backup <instance> [label]      label: manual (default) | scheduled | pre-restore | [a-z0-9-]+
+# Runs as the minecraft user (directly, via wyzi-backup@.service, or via wyzi-helper).
+# If the instance is running, saving is paused (save-off / save-all flush) for the duration
+# of the archive and always re-enabled afterwards.
+#
+# Output: /srv/storage/backups/minecraft/<instance>/<instance>-<UTC timestamp>-<label>.tar.zst (+ .sha256)
+# Settings read from /etc/wyzi-server/instances/<instance>.env:
+#   BACKUP_EXCLUDES="logs crash-reports ..."   paths relative to the instance dir
+#   BACKUP_KEEP=14            retention for label 'scheduled'
+#   BACKUP_KEEP_MANUAL=20     retention for label 'manual'   (other labels: 5)
+set -euo pipefail
+
+die() { echo "wyzi-backup: $*" >&2; exit 1; }
+log() { echo "wyzi-backup: $*"; }
+
+inst=${1:-}; label=${2:-manual}
+[[ $inst =~ ^[a-z0-9][a-z0-9-]{0,31}$ ]] || die "invalid instance name"
+[[ $label =~ ^[a-z0-9][a-z0-9-]{0,31}$ ]] || die "invalid label"
+
+envf=/etc/wyzi-server/instances/$inst.env
+src_parent=/srv/minecraft/instances
+src=$src_parent/$inst
+bulk=/srv/storage
+[[ -f $envf && -d $src ]] || die "unknown instance '$inst'"
+
+getenv() { sed -n "s/^$1=//p" "$envf" | tail -n1 | sed -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'$/\1/"; }
+excludes=$(getenv BACKUP_EXCLUDES)
+case $label in
+  scheduled) keep=$(getenv BACKUP_KEEP); keep=${keep:-14} ;;
+  manual)    keep=$(getenv BACKUP_KEEP_MANUAL); keep=${keep:-20} ;;
+  *)         keep=5 ;;
+esac
+[[ $keep =~ ^[0-9]+$ && $keep -ge 1 ]] || die "invalid retention '$keep'"
+
+# Never write backups onto the OS disk if the bulk disk is missing.
+mountpoint -q "$bulk" && [[ -e $bulk/.wyzi-bulk-tier ]] || die "$bulk is not mounted (bulk HDD missing?) - refusing"
+dest=$bulk/backups/minecraft/$inst
+mkdir -p "$dest"
+
+exec 9>"/srv/minecraft/runtime/backup-$inst.lock"
+flock -n 9 || die "a backup of '$inst' is already running"
+
+ex_args=()
+for p in $excludes; do ex_args+=("--exclude=$inst/$p"); done
+
+need_kb=$(du -sk "$src" 2>/dev/null | awk '{print $1}')   # upper bound (ignores excludes/compression)
+avail_kb=$(df -Pk "$dest" | awk 'NR==2{print $4}')
+(( avail_kb > need_kb + 1048576 )) || die "not enough space on $bulk (need ~${need_kb}K + 1G headroom, have ${avail_kb}K)"
+
+ts=$(date -u +%Y%m%dT%H%M%SZ)
+name=$inst-$ts-$label.tar.zst
+tmp=$dest/.$name.partial
+
+rcon() { /opt/wyzi-server/bin/wyzi-rcon "$inst" "$@"; }
+running=no
+if systemctl is-active --quiet "wyzi-mc@$inst.service"; then
+  running=yes
+  rcon save-off >/dev/null || die "instance is running but RCON failed - refusing an inconsistent backup"
+  trap 'rcon save-on >/dev/null || echo "wyzi-backup: WARNING could not re-enable saving!" >&2; rm -f "$tmp"' EXIT
+  rcon "save-all flush" >/dev/null || die "save-all flush failed"
+  sleep 2
+else
+  trap 'rm -f "$tmp"' EXIT
+fi
+log "instance=$inst running=$running label=$label -> $dest/$name"
+
+set +e
+nice -n 10 ionice -c2 -n7 tar -C "$src_parent" "${ex_args[@]}" -cf - "$inst" \
+  | nice -n 10 zstd -q -T2 -6 -o "$tmp"
+rc=("${PIPESTATUS[@]}")
+set -e
+# tar exit 1 = "file changed as we read it" (only expected for logs); treat as warning.
+(( rc[0] <= 1 && rc[1] == 0 )) || die "archive failed (tar=${rc[0]} zstd=${rc[1]})"
+(( rc[0] == 1 )) && log "warning: some files changed while reading (tar exit 1)"
+
+mv "$tmp" "$dest/$name"
+( cd "$dest" && sha256sum "$name" > "$name.sha256" )
+size=$(du -h "$dest/$name" | cut -f1)
+log "done: $name ($size)"
+
+# Retention per label (newest first, keep N).
+mapfile -t old < <(ls -1t "$dest"/"$inst"-*-"$label".tar.zst 2>/dev/null | tail -n +$((keep + 1)))
+for f in "${old[@]}"; do
+  log "retention: removing $(basename "$f")"
+  rm -f -- "$f" "$f.sha256"
+done
+
+printf 'last_backup=%s\nfile=%s\nsize=%s\nlabel=%s\nrunning=%s\n' "$ts" "$name" "$size" "$label" "$running" \
+  > "/srv/minecraft/runtime/backup-$inst.last"

@@ -1,0 +1,20 @@
+# Sanitized SMART summary for the portal (no serial numbers). Needs root for raw disk access.
+[Unit]
+Description=Wyzi SMART status export
+
+[Service]
+Type=oneshot
+RuntimeDirectory=wyzi-smart
+RuntimeDirectoryMode=0755
+RuntimeDirectoryPreserve=yes
+UMask=0022
+ExecStart=/usr/local/lib/wyzi/wyzi-smart-status
+Nice=10
+IOSchedulingClass=idle
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateNetwork=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
