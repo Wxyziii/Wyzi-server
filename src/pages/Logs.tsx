@@ -1,20 +1,22 @@
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Download, FileSearch } from 'lucide-react';
 import { toast, useApp, type LogEntry } from '../lib/store';
+import { IS_LIVE } from '../lib/mode';
 import { cx } from '../lib/format';
 import { Button } from '../ui/Button';
 import { TextInput } from '../ui/Controls';
 import { Empty, PageHeader, Reveal } from '../ui/Layout';
 
-const sources: { id: LogEntry['source']; label: string; color: string }[] = [
+const baseSources: { id: LogEntry['source']; label: string; color: string }[] = [
   { id: 'system', label: 'System', color: '#9CA5A1' },
   { id: 'portal', label: 'Portal', color: '#8D97B0' },
   { id: 'playit', label: 'Playit', color: '#7AA2D9' },
   { id: 'backup', label: 'Backups', color: '#9A92C8' },
-  { id: 'prominence', label: 'Prominence II', color: '#c8ccd4' },
-  { id: 'cobblemon', label: 'Cobblemon', color: '#E5AD4F' },
 ];
+const SERVER_COLORS = ['#c8ccd4', '#E5AD4F', '#8fb3a3', '#b39ddb', '#d4a5a5'];
+// prototype log entries use short source names
+const MOCK_ALIASES: Record<string, string> = { 'prominence-ii': 'prominence' };
 const levels: LogEntry['level'][] = ['debug', 'info', 'warn', 'error'];
 const levelStyle: Record<LogEntry['level'], string> = {
   debug: 'text-fg-4',
@@ -25,7 +27,19 @@ const levelStyle: Record<LogEntry['level'], string> = {
 
 export function Logs() {
   const logs = useApp((s) => s.logs);
-  const [src, setSrc] = useState<Set<string>>(new Set(sources.map((s) => s.id)));
+  const servers = useApp((s) => s.servers);
+  const sources = useMemo(
+    () => [
+      ...baseSources,
+      ...servers
+        .filter((x) => x.status !== 'undeployed')
+        .map((x, i) => ({ id: MOCK_ALIASES[x.id] ?? x.id, label: x.name, color: SERVER_COLORS[i % SERVER_COLORS.length] })),
+    ],
+    [servers.map((x) => x.id).join(',')], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+  const [hidden, setHidden] = useState<Set<string>>(new Set());
+  const src = useMemo(() => new Set(sources.map((s) => s.id).filter((id) => !hidden.has(id))), [sources, hidden]);
+  const setSrc = (next: Set<string>) => setHidden(new Set(sources.map((s) => s.id).filter((id) => !next.has(id))));
   const [lv, setLv] = useState<Set<string>>(new Set(['info', 'warn', 'error']));
   const [q, setQ] = useState('');
   const ref = useRef<HTMLDivElement>(null);
@@ -49,14 +63,26 @@ export function Logs() {
         <PageHeader
           title="Logs"
           actions={
-            <Button variant="outline" icon={Download} onClick={() => toast('Export is disabled in the prototype', 'info')}>
+            <Button
+              variant="outline"
+              icon={Download}
+              onClick={() => {
+                const text = shown.map((l) => `${l.t} [${l.source}] ${l.level.toUpperCase()} ${l.msg}`).join('\n');
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(new Blob([text], { type: 'text/plain' }));
+                a.download = `wyzi-logs-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.log`;
+                a.click();
+                URL.revokeObjectURL(a.href);
+                toast('Logs exported', 'success', `${shown.length} entries`);
+              }}
+            >
               Export
             </Button>
           }
         >
-          <span>journald + server logs, unified</span>
+          <span>{IS_LIVE ? 'Portal events, Playit, backups and server warnings' : 'journald + server logs, unified'}</span>
           <span className="h-3 w-px bg-line-3" />
-          <span className="num">{logs.length} entries today</span>
+          <span className="num">{logs.length} entries{IS_LIVE ? ' since portal start' : ' today'}</span>
         </PageHeader>
       </Reveal>
 
@@ -107,7 +133,7 @@ export function Logs() {
               <Empty icon={FileSearch} title="No log entries" desc="Nothing matches the selected sources, levels and search." />
             ) : (
               shown.map((l) => {
-                const s = sources.find((x) => x.id === l.source)!;
+                const s = sources.find((x) => x.id === l.source) ?? { id: l.source, label: l.source, color: '#9CA5A1' };
                 return (
                   <motion.div
                     key={l.id}

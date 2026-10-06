@@ -11,7 +11,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { navigate } from '../lib/router';
-import { memoryBreakdown, safelyAvailable, TOTAL_RAM, useApp, type Activity, type Server } from '../lib/store';
+import { memoryBreakdown, useApp, type Activity, type Server } from '../lib/store';
 import { cx, fmtUptime } from '../lib/format';
 import { Meter, Num, StackedBar } from '../ui/Charts';
 import { Monogram } from '../ui/Layout';
@@ -72,15 +72,16 @@ export function ActivityFeed({ limit = 7 }: { limit?: number }) {
 /* ─────────────── Memory composition ─────────────── */
 export function MemoryComposition({ showHeadroom = true }: { showHeadroom?: boolean }) {
   const servers = useApp((s) => s.servers);
-  const cache = useApp((s) => s.sys.cache);
-  const m = memoryBreakdown(servers, cache);
-  const avail = safelyAvailable(servers);
+  const mem = useApp((s) => s.memory);
+  const m = memoryBreakdown(mem);
+  const total = m.total;
+  const pressure = total ? (total - mem.available) / total : 0;
   const mcServers = servers.filter((s) => s.status === 'running' || s.status === 'starting' || s.status === 'stopping');
   const rows = [
-    { label: 'Minecraft heap', value: m.minecraft, color: '#7F9BCB', sub: mcServers.map((s) => s.name).join(', ') || 'No servers running' },
-    { label: 'System', value: m.system, color: '#6c7079', sub: 'Kernel, agent, Playit, sshd' },
+    { label: 'Minecraft', value: m.minecraft, color: '#7F9BCB', sub: mcServers.map((s) => s.name).join(', ') || 'No servers running' },
+    { label: 'System', value: m.system, color: '#6c7079', sub: 'Kernel, services, portal, Playit' },
     { label: 'Filesystem cache', value: m.cache, color: '#8D97B0', sub: 'Reclaimable', pattern: true },
-    { label: 'Available', value: m.available, color: '#1f2025', sub: 'Unused physical memory' },
+    { label: 'Free', value: m.available, color: '#1f2025', sub: 'Unused physical memory' },
   ];
   return (
     <div>
@@ -89,20 +90,22 @@ export function MemoryComposition({ showHeadroom = true }: { showHeadroom?: bool
           <div className="eyebrow">In use</div>
           <div className="mt-1 flex items-baseline gap-1.5">
             <Num value={m.used} format={(v) => v.toFixed(1)} className="text-[28px] leading-none font-semibold tracking-[-0.03em]" />
-            <span className="num text-sm text-fg-3">/ {TOTAL_RAM} GB</span>
+            <span className="num text-sm text-fg-3">/ {total.toFixed(1)} GB</span>
           </div>
         </div>
         <div className="text-right">
-          <div className="eyebrow">Pressure</div>
-          <div className={cx('mt-1 text-sm font-medium', m.used / TOTAL_RAM > 0.85 ? 'text-red' : m.used / TOTAL_RAM > 0.7 ? 'text-amber' : 'text-fg-2')}>
-            {m.used / TOTAL_RAM > 0.85 ? 'High' : m.used / TOTAL_RAM > 0.7 ? 'Elevated' : 'Normal'}
+          <Tooltip content={`MemAvailable ${mem.available.toFixed(1)} GB`}>
+            <div className="eyebrow">Pressure</div>
+          </Tooltip>
+          <div className={cx('mt-1 text-sm font-medium', pressure > 0.85 ? 'text-red' : pressure > 0.7 ? 'text-amber' : 'text-fg-2')}>
+            {pressure > 0.85 ? 'High' : pressure > 0.7 ? 'Elevated' : 'Normal'}
           </div>
         </div>
       </div>
       <StackedBar
         className="mt-4"
         height={12}
-        total={TOTAL_RAM}
+        total={total}
         segments={rows.map((r) => ({ label: r.label, value: r.value, color: r.color, pattern: r.pattern }))}
       />
       <div className="mt-4 space-y-0.5">
@@ -112,7 +115,7 @@ export function MemoryComposition({ showHeadroom = true }: { showHeadroom?: bool
               className="h-2.5 w-2.5 shrink-0 rounded-[3px]"
               style={{
                 background: r.pattern ? `repeating-linear-gradient(-45deg, ${r.color} 0 1.5px, transparent 1.5px 3.5px)` : r.color,
-                boxShadow: r.label === 'Available' ? 'inset 0 0 0 1px #3a3c43' : r.pattern ? `inset 0 0 0 1px ${r.color}` : undefined,
+                boxShadow: r.label === 'Free' ? 'inset 0 0 0 1px #3a3c43' : r.pattern ? `inset 0 0 0 1px ${r.color}` : undefined,
               }}
             />
             <div className="min-w-0 flex-1">
@@ -130,8 +133,9 @@ export function MemoryComposition({ showHeadroom = true }: { showHeadroom?: bool
         <div className="mt-3 flex items-start gap-2.5 rounded-lg border border-line-2 bg-bg-1/70 px-3 py-2.5">
           <ArrowDownToLine size={13} className="mt-0.5 shrink-0 text-fg-3" />
           <div className="text-xs leading-relaxed text-fg-3">
-            <span className="num font-medium text-fg">{avail} GB</span> can be safely allocated to another server. WYZI keeps{' '}
-            <span className="text-fg-2">2.5 GB</span> headroom so the host never swaps.
+            <span className="num font-medium text-fg">{mem.safeForNew.toFixed(1)} GB</span> can be safely given to another server. WYZI keeps{' '}
+            <span className="text-fg-2">{mem.headroom.toFixed(1)} GB</span> of available memory free
+            {mem.reservedGrowth > 0.05 && <> and reserves <span className="num text-fg-2">{mem.reservedGrowth.toFixed(1)} GB</span> for running servers to grow</>} so the host never swaps.
           </div>
         </div>
       )}
@@ -176,9 +180,9 @@ export function ServerRow({ s }: { s: Server }) {
               {s.ramUsed > 0 ? s.ramUsed.toFixed(1) : '0'} <span className="text-fg-4">/ {s.ramAlloc} GB</span>
             </span>
           </div>
-          <Meter className="mt-1.5" value={s.ramUsed} max={s.ramAlloc} tone={s.status === 'starting' || s.ramUsed / s.ramAlloc > 0.95 ? 'amber' : 'slate'} height={3} />
+          <Meter className="mt-1.5" value={s.ramUsed} max={s.ramAlloc || 1} tone={s.status === 'starting' || s.ramUsed / s.ramAlloc > 0.95 ? 'amber' : 'slate'} height={3} />
           <div className="mt-1 truncate text-2xs text-fg-4">
-            {live ? `Up ${fmtUptime(s.uptime)}` : s.status === 'sleeping' ? (s.wakeOnConnect ? 'Wake-on-connect enabled' : 'Sleeping') : s.status === 'starting' ? 'Allocating…' : `Last online ${s.lastOnline}`}
+            {live ? `Up ${fmtUptime(s.uptime)}` : s.status === 'undeployed' ? 'Awaiting deployment' : s.status === 'failed' ? (s.lastError ?? 'Exited unexpectedly') : s.status === 'sleeping' ? (s.wakeOnConnect ? 'Wake-on-connect enabled' : 'Sleeping') : s.status === 'starting' ? 'Allocating…' : `Last online ${s.lastOnline}`}
           </div>
         </div>
         <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>

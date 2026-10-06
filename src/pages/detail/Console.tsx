@@ -8,9 +8,10 @@ import { Tooltip } from '../../ui/Tooltip';
 import { StatusBadge } from '../../ui/Status';
 import { copyText } from '../shared';
 import { toast } from '../../lib/store';
+import { IS_LIVE } from '../../lib/mode';
 
 const EMPTY: ConsoleLine[] = [];
-const SUGGEST = ['say ', 'list', 'tps', 'help', 'save-all', 'time set day', 'weather clear', 'op ', 'stop'];
+const SUGGEST = ['say ', 'list', 'tick query', 'help', 'save-all', 'time set day', 'weather clear', 'whitelist add ', 'op ', 'kick ', 'stop'];
 
 const levelClass: Record<ConsoleLine['level'], string> = {
   info: 'text-[#c4ccc8]',
@@ -31,6 +32,7 @@ const levelTag: Record<ConsoleLine['level'], string> = {
 
 export function ConsoleView({ s, height = 'calc(100vh - 330px)' }: { s: Server; height?: string }) {
   const lines = useApp((st) => st.consoles[s.id] ?? EMPTY);
+  const host = useApp((st) => st.host?.hostname ?? 'wyzi-server');
   const [cmd, setCmd] = useState('');
   const [hist, setHist] = useState<string[]>([]);
   const [hIdx, setHIdx] = useState(-1);
@@ -86,7 +88,7 @@ export function ConsoleView({ s, height = 'calc(100vh - 330px)' }: { s: Server; 
           <span className="h-2.5 w-2.5 rounded-full bg-[#2a2b31]" />
           <span className="h-2.5 w-2.5 rounded-full bg-[#2a2b31]" />
         </div>
-        <span className="font-mono text-[11px] text-fg-3">{s.id}@wyzi-server · latest.log</span>
+        <span className="font-mono text-[11px] text-fg-3">{s.id}@{host} · latest.log{IS_LIVE ? ' · RCON' : ''}</span>
         <StatusBadge status={s.status} className="ml-1" />
         <div className="ml-auto flex items-center gap-1">
           <label className="mr-1 flex h-6 w-40 items-center gap-1.5 rounded-[5px] bg-white/[0.03] px-2 shadow-[inset_0_0_0_1px_var(--color-line-2)] focus-within:shadow-[inset_0_0_0_1px_var(--color-line-4)]">

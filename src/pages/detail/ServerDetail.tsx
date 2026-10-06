@@ -11,7 +11,8 @@ import {
   Users,
 } from 'lucide-react';
 import { navigate } from '../../lib/router';
-import { useApp } from '../../lib/store';
+import { useEffect } from 'react';
+import { subscribeConsole, useApp } from '../../lib/store';
 import { cx, fmtUptime } from '../../lib/format';
 import { Button } from '../../ui/Button';
 import { Num, Sparkline } from '../../ui/Charts';
@@ -19,13 +20,15 @@ import { Tabs } from '../../ui/Controls';
 import { Empty, Monogram, Reveal } from '../../ui/Layout';
 import { StatusBadge } from '../../ui/Status';
 import { Tooltip } from '../../ui/Tooltip';
-import { copyAddress, monogramTone, MoreMenu, PowerActions, PUBLIC_HOST, useServer } from '../shared';
+import { copyAddress, monogramTone, MoreMenu, PowerActions, serverAddress, useServer } from '../shared';
 import { ConsoleView } from './Console';
 import { BackupsTab, FilesTab, OverviewTab, PerformanceTab, PlayersTab, SettingsTab } from './Tabs';
 
 export function ServerDetail({ id, tab }: { id: string; tab: string }) {
   const s = useServer(id);
   const backups = useApp((st) => st.backups);
+  // live mode: stream this instance's console while its detail page is open
+  useEffect(() => subscribeConsole(id), [id]);
   if (!s)
     return (
       <div className="surface rounded-xl">
@@ -43,6 +46,7 @@ export function ServerDetail({ id, tab }: { id: string; tab: string }) {
     );
 
   const live = s.status === 'running';
+  const addr = serverAddress(s);
   const tabs = [
     { value: 'overview', label: 'Overview', icon: LayoutDashboard },
     { value: 'console', label: 'Console', icon: Terminal },
@@ -75,12 +79,12 @@ export function ServerDetail({ id, tab }: { id: string; tab: string }) {
             )}
             <span className="text-fg-4">·</span>
             <span className="font-mono text-[11px]">127.0.0.1:{s.port}</span>
-            {s.tunnelPort > 0 && (
+            {addr && (
               <>
                 <span className="text-fg-4">·</span>
                 <Tooltip content="Copy public address">
-                  <button onClick={() => copyAddress(`${PUBLIC_HOST}:${s.tunnelPort}`)} className="group flex items-center gap-1 font-mono text-[11px] text-fg-3 transition-colors hover:text-fg">
-                    {PUBLIC_HOST}:{s.tunnelPort}
+                  <button onClick={() => copyAddress(addr)} className="group flex items-center gap-1 font-mono text-[11px] text-fg-3 transition-colors hover:text-fg">
+                    {addr}
                     <Copy size={10} className="opacity-50 group-hover:opacity-100" />
                   </button>
                 </Tooltip>

@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   Archive,
   ArrowUpRight,
+  Lock,
   Ban,
   ChevronRight,
   Crown,
@@ -29,12 +30,16 @@ import {
   BACKUP_STEPS,
   createBackup,
   patchServerSettings,
-  safelyAvailable,
+  requestRestore,
+  safeXmxFor,
+  sendCommand,
   toast,
   useApp,
   type ConsoleLine,
   type Server,
 } from '../../lib/store';
+import { api, enc } from '../../lib/api';
+import { IS_LIVE } from '../../lib/mode';
 import { cx } from '../../lib/format';
 import { Button, IconButton } from '../../ui/Button';
 import { AreaChart, Meter } from '../../ui/Charts';
@@ -47,6 +52,25 @@ import { StartupSequence } from '../shared';
 
 const EMPTY: ConsoleLine[] = [];
 
+/** Live mode: the portal can read instance config but not write it (root-owned env, read-only ACL). */
+function Locked({ children, why }: { children: React.ReactNode; why?: string }) {
+  if (!IS_LIVE) return <>{children}</>;
+  return (
+    <Tooltip content={why ?? 'Read-only in the portal — edit on the server (requires admin)'}>
+      <div className="flex items-center gap-2">
+        <div className="pointer-events-none opacity-50">{children}</div>
+        <Lock size={11} className="text-fg-4" />
+      </div>
+    </Tooltip>
+  );
+}
+
+function Unavailable({ children = 'Not available yet' }: { children?: React.ReactNode }) {
+  return <Badge tone="neutral">{children}</Badge>;
+}
+
+const ping = (p: { ping: number | null }) => (p.ping == null ? '—' : `${p.ping} ms`);
+
 /* ═════════════════════ OVERVIEW ═════════════════════ */
 export function OverviewTab({ s }: { s: Server }) {
   const lines = useApp((st) => st.consoles[s.id] ?? EMPTY);
@@ -54,6 +78,8 @@ export function OverviewTab({ s }: { s: Server }) {
   const [metric, setMetric] = useState<'tps' | 'mspt' | 'ram'>('mspt');
   const live = s.status === 'running';
   const mine = backups.filter((b) => b.serverId === s.id).slice(0, 3);
+  const sysDisk = useApp((st) => st.storage?.volumes.find((v) => v.id === 'system')?.disk);
+  const diskName = sysDisk ? `${Math.round(sysDisk.sizeBytes / 1e9) >= 1000 ? Math.round(sysDisk.sizeBytes / 1e12) + ' TB' : Math.round(sysDisk.sizeBytes / 1e9) + ' GB'} ${sysDisk.kind}` : 'system disk';
 
   return (
     <div className="grid grid-cols-12 gap-4">
@@ -94,7 +120,9 @@ export function OverviewTab({ s }: { s: Server }) {
             />
           }
         >
-          {live || s.status === 'starting' || s.hist.cpu.some((v) => v > 0) ? (
+          {live && s.tickSupported === false && (metric === 'tps' || metric === 'mspt') ? (
+            <Empty icon={Zap} title="Tick metrics unavailable" desc="This server does not support /tick query (Minecraft 1.20.3+). Heap and CPU are still recorded." />
+          ) : live || s.status === 'starting' || s.hist.cpu.some((v) => v > 0) ? (
             <AreaChart
               key={metric}
               height={210}
@@ -149,10 +177,10 @@ export function OverviewTab({ s }: { s: Server }) {
                     {p.op && <Crown size={11} className="text-amber" />}
                   </div>
                   <div className="text-2xs text-fg-4">
-                    {p.dimension} · since {p.joined}
+                    {p.dimension ? `${p.dimension} · ` : ''}since {p.joined}
                   </div>
                 </div>
-                <span className={cx('num text-xs', p.ping > 80 ? 'text-amber' : 'text-fg-3')}>{p.ping} ms</span>
+                <span className={cx('num text-xs', (p.ping ?? 0) > 80 ? 'text-amber' : 'text-fg-3')}>{ping(p)}</span>
               </div>
             ))
           ) : (
@@ -164,11 +192,15 @@ export function OverviewTab({ s }: { s: Server }) {
           <KV k="Loader" v={s.loader} />
           <KV k="Minecraft" v={s.mc} />
           <KV k="Java runtime" v={s.java} />
-          <KV k="Heap" v={`-Xms${s.ramAlloc}G -Xmx${s.ramAlloc}G`} mono />
-          <KV k="Directory" v={`/srv/minecraft/${s.id}`} mono />
+          <KV k="Heap" v={`-Xms${s.ramMin ?? s.ramAlloc}G -Xmx${s.ramAlloc}G`} mono />
+          <KV k="Directory" v={s.path ?? `/srv/minecraft/instances/${s.id}`} mono />
+          {IS_LIVE && <KV k="Service" v={s.service ?? `wyzi-mc@${s.id}`} mono />}
           <KV k="World size" v={s.worldSize} />
-          <KV k="Disk usage" v={`${s.diskSize} GB on SSD`} />
-          <KV k="Sleep policy" v={s.wakeOnConnect ? 'Wake on connect' : s.autoStop ? 'Stop when idle' : 'Always on'} />
+          <KV k="Disk usage" v={`${s.diskSize} GB on ${diskName}`} />
+          <KV
+            k={IS_LIVE ? 'Start on boot' : 'Sleep policy'}
+            v={IS_LIVE ? (s.enabled ? 'Enabled' : 'Disabled') : s.wakeOnConnect ? 'Wake on connect' : s.autoStop ? 'Stop when idle' : 'Always on'}
+          />
         </Panel>
 
         <Panel
@@ -218,15 +250,26 @@ const offlinePlayers = [
 
 export function PlayersTab({ s }: { s: Server }) {
   const live = s.status === 'running';
-  const playerMenu = (name: string) => [
-    { heading: name },
-    { label: 'Send message', icon: MessageSquare, onSelect: () => toast(`Message sent to ${name}`, 'success') },
-    { label: 'Teleport to spawn', icon: RotateCcw, onSelect: () => toast(`${name} teleported to spawn`, 'success') },
-    { label: 'Toggle operator', icon: Crown, onSelect: () => toast(`Operator status changed for ${name}`, 'info') },
-    { separator: true },
-    { label: 'Kick', icon: UserMinus, danger: true, onSelect: () => toast(`${name} was kicked`, 'warn', 'Prototype — nobody was actually kicked') },
-    { label: 'Ban…', icon: Ban, danger: true, onSelect: () => toast('Bans are disabled in the prototype', 'warn') },
-  ];
+  const playerMenu = (name: string, op?: boolean) =>
+    IS_LIVE
+      ? [
+          { heading: name },
+          { label: op ? 'Remove operator' : 'Make operator', icon: Crown, onSelect: () => sendCommand(s.id, `${op ? 'deop' : 'op'} ${name}`) },
+          { label: 'Send message', icon: MessageSquare, disabled: true, onSelect: () => {} },
+          { separator: true },
+          { label: 'Kick', icon: UserMinus, danger: true, onSelect: () => sendCommand(s.id, `kick ${name}`) },
+          { label: 'Ban… (use console)', icon: Ban, danger: true, disabled: true, onSelect: () => {} },
+        ]
+      : [
+          { heading: name },
+          { label: 'Send message', icon: MessageSquare, onSelect: () => toast(`Message sent to ${name}`, 'success') },
+          { label: 'Teleport to spawn', icon: RotateCcw, onSelect: () => toast(`${name} teleported to spawn`, 'success') },
+          { label: 'Toggle operator', icon: Crown, onSelect: () => toast(`Operator status changed for ${name}`, 'info') },
+          { separator: true },
+          { label: 'Kick', icon: UserMinus, danger: true, onSelect: () => toast(`${name} was kicked`, 'warn', 'Prototype — nobody was actually kicked') },
+          { label: 'Ban…', icon: Ban, danger: true, onSelect: () => toast('Bans are disabled in the prototype', 'warn') },
+        ];
+  const whitelist = IS_LIVE ? (s.whitelist ?? []).map((name) => ({ name, lastSeen: '', playtime: '' })) : offlinePlayers;
   return (
     <div className="grid grid-cols-12 gap-4">
       <Panel
@@ -249,7 +292,7 @@ export function PlayersTab({ s }: { s: Server }) {
             </thead>
             <tbody>
               {s.players.map((p) => (
-                <PlayerRow key={p.name} menu={playerMenu(p.name)}>
+                <PlayerRow key={p.name} menu={playerMenu(p.name, p.op)}>
                   <td className="px-4 py-2.5">
                     <div className="flex items-center gap-2.5">
                       <Avatar name={p.name} />
@@ -257,16 +300,16 @@ export function PlayersTab({ s }: { s: Server }) {
                       {p.op && <Badge tone="amber">OP</Badge>}
                     </div>
                   </td>
-                  <td className="px-4 text-fg-2">{p.dimension}</td>
+                  <td className="px-4 text-fg-2">{p.dimension ?? '—'}</td>
                   <td className="num px-4 text-fg-3">{p.joined}</td>
                   <td className="px-4 text-right">
                     <span className="num inline-flex items-center gap-1.5 text-fg-2">
-                      <PingBars ping={p.ping} />
-                      {p.ping} ms
+                      {p.ping != null && <PingBars ping={p.ping} />}
+                      {ping(p)}
                     </span>
                   </td>
                   <td className="pr-3 text-right">
-                    <Dropdown items={playerMenu(p.name)} trigger={({ onClick }) => <IconButton icon={MoreHorizontal} label="Player actions" size="xs" onClick={onClick} />} />
+                    <Dropdown items={playerMenu(p.name, p.op)} trigger={({ onClick }) => <IconButton icon={MoreHorizontal} label="Player actions" size="xs" onClick={onClick} />} />
                   </td>
                 </PlayerRow>
               ))}
@@ -277,16 +320,21 @@ export function PlayersTab({ s }: { s: Server }) {
         )}
       </Panel>
 
-      <Panel className="col-span-12 xl:col-span-4" title="Whitelist" icon={Shield} meta={`${offlinePlayers.length + s.players.length} players`} bodyClass="px-2 py-2"
-        actions={<Button size="xs" variant="ghost" icon={Plus} onClick={() => toast('Player added to whitelist', 'success', 'Prototype')}>Add</Button>}>
-        {offlinePlayers.map((p) => (
+      <Panel className="col-span-12 xl:col-span-4" title="Whitelist" icon={Shield}
+        meta={IS_LIVE ? `${whitelist.length} players · ${s.properties?.['white-list'] === 'true' ? 'enforced' : 'not enabled'}` : `${offlinePlayers.length + s.players.length} players`}
+        bodyClass="px-2 py-2"
+        actions={IS_LIVE
+          ? <Tooltip content="Use the console: whitelist add <name>"><span><Button size="xs" variant="ghost" icon={Terminal} onClick={() => navigate(`/servers/${s.id}/console`)}>Console</Button></span></Tooltip>
+          : <Button size="xs" variant="ghost" icon={Plus} onClick={() => toast('Player added to whitelist', 'success', 'Prototype')}>Add</Button>}>
+        {whitelist.length === 0 && <div className="px-2 py-5 text-center text-sm text-fg-4">Whitelist is empty</div>}
+        {whitelist.map((p) => (
           <div key={p.name} className="flex items-center gap-2.5 rounded-md px-2 py-1.5 hover:bg-white/[0.025]">
             <span className="opacity-60">
               <Avatar name={p.name} size={24} />
             </span>
             <div className="min-w-0 flex-1">
               <div className="text-sm text-fg-2">{p.name}</div>
-              <div className="text-2xs text-fg-4">Last seen {p.lastSeen}</div>
+              {p.lastSeen && <div className="text-2xs text-fg-4">Last seen {p.lastSeen}</div>}
             </div>
             <span className="num text-xs text-fg-4">{p.playtime}</span>
           </div>
@@ -382,6 +430,149 @@ const jvmFile = (s: Server) => `# Managed by WYZI — edits are preserved
 -XX:G1ReservePercent=20`;
 
 export function FilesTab({ s }: { s: Server }) {
+  if (IS_LIVE) return <LiveFilesTab s={s} />;
+  return <MockFilesTab s={s} />;
+}
+
+type LiveEntry = { name: string; dir: boolean; size: string | null; modified: string; previewable: boolean };
+
+/** Read-only browser backed by /api/instances/<id>/files (confined to the instance dir, secrets redacted). */
+function LiveFilesTab({ s }: { s: Server }) {
+  const [path, setPath] = useState<string[]>([]);
+  const [entries, setEntries] = useState<LiveEntry[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [open, setOpen] = useState<string | null>(null);
+  const [content, setContent] = useState<{ text: string; truncated: boolean } | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const rel = path.join('/');
+
+  useEffect(() => {
+    let live = true;
+    setEntries(null);
+    setError(null);
+    api
+      .get<{ entries: LiveEntry[] }>(`/api/instances/${enc(s.id)}/files?path=${enc(rel)}`)
+      .then((r) => live && setEntries(r.entries))
+      .catch((e: Error) => live && setError(e.message));
+    return () => {
+      live = false;
+    };
+  }, [s.id, rel]);
+
+  useEffect(() => {
+    if (open === null && path.length === 0) setOpen('server.properties');
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!open) return;
+    let live = true;
+    setContent(null);
+    setPreviewError(null);
+    api
+      .get<{ content: string; truncated: boolean }>(`/api/instances/${enc(s.id)}/files/content?path=${enc(open)}`)
+      .then((r) => live && setContent({ text: r.content, truncated: r.truncated }))
+      .catch((e: Error) => live && setPreviewError(e.message));
+    return () => {
+      live = false;
+    };
+  }, [s.id, open]);
+
+  const root = s.path ?? `/srv/minecraft/instances/${s.id}`;
+  return (
+    <div className="grid grid-cols-12 gap-4">
+      <section className="surface col-span-12 overflow-hidden rounded-xl xl:col-span-7">
+        <div className="flex h-11 items-center gap-1 border-b border-line px-3">
+          <button onClick={() => setPath([])} className="rounded px-1.5 py-0.5 font-mono text-[11.5px] text-fg-3 hover:bg-white/5 hover:text-fg">
+            {root}
+          </button>
+          {path.map((p, i) => (
+            <span key={i} className="flex items-center gap-1">
+              <ChevronRight size={12} className="text-fg-4" />
+              <button onClick={() => setPath(path.slice(0, i + 1))} className="rounded px-1.5 py-0.5 font-mono text-[11.5px] text-fg-2 hover:bg-white/5 hover:text-fg">
+                {p}
+              </button>
+            </span>
+          ))}
+          <div className="ml-auto flex items-center gap-1.5 text-2xs text-fg-4">
+            <Lock size={11} /> Read-only
+          </div>
+        </div>
+        <div className="grid grid-cols-[1fr_100px_120px] border-b border-line px-4 py-1.5 text-2xs text-fg-4">
+          <span>Name</span>
+          <span className="text-right">Size</span>
+          <span className="text-right">Modified</span>
+        </div>
+        <div className="min-h-[360px]">
+          {path.length > 0 && (
+            <button onClick={() => setPath(path.slice(0, -1))} className="grid w-full grid-cols-[1fr_100px_120px] items-center px-4 py-[7px] text-left text-sm text-fg-3 hover:bg-white/[0.025]">
+              <span className="flex items-center gap-2.5">
+                <FolderUp size={14} /> ..
+              </span>
+            </button>
+          )}
+          {error && <Empty icon={Folder} title="Cannot open folder" desc={error} />}
+          {!error && entries === null && <div className="px-4 py-6 text-sm text-fg-4">Loading…</div>}
+          {entries?.map((n) => {
+            const full = [...path, n.name].join('/');
+            return (
+              <FileRow
+                key={n.name}
+                n={{ name: n.name, dir: n.dir, size: n.size ?? undefined, modified: n.modified }}
+                active={open === full}
+                readOnly
+                onOpen={() => (n.dir ? setPath([...path, n.name]) : setOpen(full))}
+              />
+            );
+          })}
+          {entries?.length === 0 && <Empty icon={Folder} title="Empty folder" desc="Nothing in here yet." />}
+        </div>
+      </section>
+
+      <section className="surface col-span-12 flex flex-col overflow-hidden rounded-xl xl:col-span-5">
+        <div className="flex h-11 items-center gap-2 border-b border-line px-4">
+          <FileCode2 size={14} className="text-fg-3" />
+          <span className="truncate font-mono text-[12px]">{open ?? 'No file selected'}</span>
+          {content && <Badge tone="neutral" className="ml-1">{open?.endsWith('.properties') ? 'properties' : 'text'}</Badge>}
+          {content?.truncated && <Badge tone="amber">truncated</Badge>}
+          <div className="ml-auto flex items-center gap-1.5 text-2xs text-fg-4">
+            <Lock size={11} /> secrets redacted
+          </div>
+        </div>
+        {content ? <CodeView text={content.text} /> : (
+          <Empty icon={FileText} title={open ? (previewError ? 'Preview unavailable' : 'Loading…') : 'Select a file'} desc={open ? previewError ?? '' : 'Choose a text file to preview it.'} />
+        )}
+      </section>
+    </div>
+  );
+}
+
+function CodeView({ text }: { text: string }) {
+  return (
+    <div className="min-h-0 flex-1 overflow-auto bg-[#070708] py-2 font-mono text-[11.5px] leading-[19px]">
+      {text.split('\n').map((ln, i) => {
+        const [k, ...v] = ln.split('=');
+        return (
+          <div key={i} className="flex hover:bg-white/[0.02]">
+            <span className="w-10 shrink-0 pr-3 text-right text-fg-4 select-none">{i + 1}</span>
+            {ln.startsWith('#') ? (
+              <span className="text-fg-4">{ln}</span>
+            ) : v.length ? (
+              <span>
+                <span className="text-blue">{k}</span>
+                <span className="text-fg-4">=</span>
+                <span className={v.join('=') === 'true' || v.join('=') === 'false' ? 'text-amber' : /^\d+$/.test(v.join('=')) ? 'text-violet' : 'text-fg'}>{v.join('=')}</span>
+              </span>
+            ) : (
+              <span className="whitespace-pre text-fg-2">{ln}</span>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function MockFilesTab({ s }: { s: Server }) {
   const [path, setPath] = useState<string[]>([]);
   const [open, setOpen] = useState<string | null>('server.properties');
   let nodes = fileTree(s);
@@ -476,13 +667,13 @@ export function FilesTab({ s }: { s: Server }) {
   );
 }
 
-function FileRow({ n, active, onOpen }: { n: Node; active: boolean; onOpen: () => void }) {
+function FileRow({ n, active, onOpen, readOnly }: { n: Node; active: boolean; onOpen: () => void; readOnly?: boolean }) {
   const onCtx = useContextMenu([
     { heading: n.name },
     { label: n.dir ? 'Open folder' : 'Open', icon: n.dir ? Folder : FileText, onSelect: onOpen },
-    { label: 'Download', icon: ArrowUpRight, onSelect: () => toast('Downloads are disabled in the prototype', 'info') },
+    { label: 'Download', icon: ArrowUpRight, disabled: readOnly, onSelect: () => toast('Downloads are disabled in the prototype', 'info') },
     { separator: true },
-    { label: 'Delete', icon: Trash2, danger: true, onSelect: () => toast('File deletion is disabled in the prototype', 'warn') },
+    { label: 'Delete', icon: Trash2, danger: true, disabled: readOnly, onSelect: () => toast('File deletion is disabled in the prototype', 'warn') },
   ]);
   return (
     <button
@@ -526,12 +717,17 @@ export function PerformanceTab({ s }: { s: Server }) {
       <Panel className="col-span-12 lg:col-span-6" title="Milliseconds per tick" meta={live ? `${s.mspt} ms now` : undefined}>
         <AreaChart height={170} series={[{ data: s.hist.mspt, color: 'blue', label: 'MSPT' }]} max={60} format={(v) => `${v.toFixed(0)}`} threshold={{ value: 50, label: '50 ms budget', color: 'red' }} />
       </Panel>
-      <Panel className="col-span-12 lg:col-span-6" title="Heap usage" meta={`${s.ramUsed} / ${s.ramAlloc} GB · G1GC`}>
-        <AreaChart height={170} series={[{ data: s.hist.ram, color: 'slate', label: 'Heap' }]} max={s.ramAlloc} format={(v) => `${v.toFixed(1)}G`} />
+      <Panel className="col-span-12 lg:col-span-6" title={IS_LIVE ? 'Process memory' : 'Heap usage'} meta={IS_LIVE ? `${s.ramUsed.toFixed(1)} GB RSS · heap max ${s.ramAlloc} GB` : `${s.ramUsed} / ${s.ramAlloc} GB · G1GC`}>
+        <AreaChart height={170} series={[{ data: s.hist.ram, color: 'slate', label: IS_LIVE ? 'RSS' : 'Heap' }]} max={Math.max(s.ramAlloc, s.footprint ?? 0, ...s.hist.ram)} format={(v) => `${v.toFixed(1)}G`} />
       </Panel>
       <Panel className="col-span-12 lg:col-span-6" title="Process CPU" meta="Share of 4 cores">
         <AreaChart height={170} series={[{ data: s.hist.cpu, color: 'violet', label: 'CPU' }]} max={100} format={(v) => `${v.toFixed(0)}%`} />
       </Panel>
+      {IS_LIVE ? (
+        <Panel className="col-span-12" title="Tick breakdown & garbage collection" actions={<Unavailable>Needs spark integration</Unavailable>}>
+          <Empty icon={Zap} title="Profiler data not connected yet" desc="Per-system tick timings and GC statistics will come from the spark mod once the portal integrates it. Run /spark profiler in the console in the meantime." />
+        </Panel>
+      ) : (<>
       <Panel className="col-span-12 xl:col-span-8" title="Tick breakdown" meta="Sampled by spark · last 5 minutes" bodyClass="px-4 py-2">
         {tickers.map((t) => (
           <div key={t.name} className="grid grid-cols-[1fr_140px_64px] items-center gap-4 py-2">
@@ -552,6 +748,7 @@ export function PerformanceTab({ s }: { s: Server }) {
         <KV k="Loaded chunks" v="2,318" />
         <KV k="Entities" v="1,904" />
       </Panel>
+      </>)}
     </div>
   );
 }
@@ -576,12 +773,12 @@ export function BackupsTab({ s }: { s: Server }) {
             </div>
           ) : (
             <div className="mt-0.5 text-xs text-fg-3">
-              World saves are paused for a few seconds. Players stay connected. Backups are written to <span className="font-mono">/mnt/archive/backups/{s.id}</span>.
+              World saves are paused while the archive is written. Players stay connected. Backups are written to <span className="font-mono">/srv/storage/backups/minecraft/{s.id}</span> on the bulk HDD.
             </div>
           )}
         </div>
-        <Button variant="primary" icon={Archive} loading={mine} disabled={!!job && !mine} onClick={() => createBackup(s.id)}>
-          {mine ? 'Backing up' : 'Create backup'}
+        <Button variant="primary" icon={Archive} loading={mine} disabled={(!!job && !mine) || s.status === 'undeployed'} onClick={() => createBackup(s.id)}>
+          {mine ? (job?.kind === 'restore' ? 'Restoring' : 'Backing up') : 'Create backup'}
         </Button>
       </section>
       <section className="surface overflow-hidden rounded-xl">
@@ -595,8 +792,8 @@ export function BackupsTab({ s }: { s: Server }) {
               </div>
               <Badge tone={b.type === 'Manual' ? 'blue' : 'neutral'}>{b.type}</Badge>
               <span className="num w-16 text-right text-sm">{b.status === 'success' ? `${b.size} GB` : '—'}</span>
-              <Button size="xs" variant="outline" icon={RotateCcw} disabled={b.status !== 'success'} onClick={() => toast('Restore is disabled in the prototype', 'info')}>
-                Restore
+              <Button size="xs" variant="outline" icon={RotateCcw} disabled={b.status !== 'success'} onClick={() => requestRestore(s.id, b.id)}>
+                Restore…
               </Button>
             </div>
           ))
@@ -610,28 +807,42 @@ export function BackupsTab({ s }: { s: Server }) {
 
 /* ═════════════════════ SETTINGS ═════════════════════ */
 export function SettingsTab({ s }: { s: Server }) {
-  const servers = useApp((st) => st.servers);
+  const memory = useApp((st) => st.memory);
+  const host = useApp((st) => st.host);
+  const props = s.properties ?? {};
+  const cap = (v?: string) => (v ? v[0].toUpperCase() + v.slice(1) : 'Normal');
   const [ram, setRam] = useState(s.ramAlloc);
-  const [difficulty, setDifficulty] = useState('Normal');
+  const [difficulty, setDifficulty] = useState(cap(props.difficulty));
   const [maxPlayers, setMaxPlayers] = useState(s.maxPlayers);
-  const [view, setView] = useState(10);
-  const [sim, setSim] = useState(8);
-  const [whitelist, setWhitelist] = useState(true);
-  const [pvp, setPvp] = useState(true);
+  const [view, setView] = useState(Number(props['view-distance'] ?? 10));
+  const [sim, setSim] = useState(Number(props['simulation-distance'] ?? 8));
+  const [whitelist, setWhitelist] = useState(props['white-list'] ? props['white-list'] === 'true' : true);
+  const [pvp, setPvp] = useState(props.pvp ? props.pvp === 'true' : true);
   const [backupStop, setBackupStop] = useState(true);
   const [java, setJava] = useState(s.java);
-  const safeMax = +(safelyAvailable(servers, s.id) + 0).toFixed(1);
-  const dirty = ram !== s.ramAlloc;
+  const safeMax = safeXmxFor(s, memory);
+  const dirty = !IS_LIVE && ram !== s.ramAlloc;
+  const javaOptions = IS_LIVE && host ? host.java.map((j) => `OpenJDK ${j.version}`) : ['OpenJDK 17.0.19', 'OpenJDK 21.0.11', 'OpenJDK 25.0.3'];
+  const envFile = `/etc/wyzi-server/instances/${s.id}.env`;
 
   return (
     <div className="mx-auto max-w-[860px] space-y-4">
-      <SettingsGroup title="Resources" desc="Memory is reserved in full when the server starts.">
+      {IS_LIVE && (
+        <div className="flex items-start gap-2.5 rounded-lg border border-line-2 bg-bg-1/70 px-3.5 py-2.5 text-xs text-fg-3">
+          <Lock size={13} className="mt-0.5 shrink-0" />
+          <span>
+            Instance configuration is read-only in the portal. Java, heap and flags live in <span className="font-mono text-fg-2">{envFile}</span>; gameplay values in{' '}
+            <span className="font-mono text-fg-2">server.properties</span>. Editing them needs admin access on the server — see MINECRAFT_DEPLOYMENT.md.
+          </span>
+        </div>
+      )}
+      <SettingsGroup title="Resources" desc={IS_LIVE ? 'Heap plus JVM overhead is reserved by the RAM safety check.' : 'Memory is reserved in full when the server starts.'}>
         <div className="px-5 py-4">
           <div className="flex items-center justify-between">
             <div>
               <div className="text-sm font-medium">Memory allocation</div>
               <div className="text-xs text-fg-3">
-                Sets -Xms and -Xmx. <span className="num">{safeMax} GB</span> can run alongside the other active servers.
+                Sets -Xmx{IS_LIVE ? ` (currently -Xms${s.ramMin ?? s.ramAlloc}G -Xmx${s.ramAlloc}G)` : ' and -Xms'}. <span className="num">{safeMax} GB</span> can run alongside the other active servers.
               </div>
             </div>
             <div className="num text-[22px] font-semibold tracking-tight">
@@ -640,7 +851,11 @@ export function SettingsTab({ s }: { s: Server }) {
             </div>
           </div>
           <div className="mt-4">
-            <Slider value={ram} onChange={setRam} min={1} max={12} step={0.5} marks={[2, 4, 6, 8, 10]} danger={Math.max(1, safeMax)} />
+            <Locked why={`Set XMX in ${envFile}`}>
+              <div className="w-[640px] max-w-full">
+                <Slider value={ram} onChange={setRam} min={1} max={12} step={0.5} marks={[2, 4, 6, 8, 10]} danger={Math.max(1, safeMax)} />
+              </div>
+            </Locked>
             <div className="num mt-1.5 flex justify-between text-2xs text-fg-4">
               <span>1 GB</span>
               <span>12 GB</span>
@@ -657,56 +872,76 @@ export function SettingsTab({ s }: { s: Server }) {
           </AnimatePresence>
         </div>
         <Row label="Java runtime" desc="Runtime used to launch the server process.">
-          <Select value={java} onChange={setJava} width={190} options={['Temurin 8u422', 'Temurin 17.0.12', 'Temurin 21.0.4']} />
+          <Locked why={`Set JAVA in ${envFile}`}>
+            <Select value={java} onChange={setJava} width={190} options={javaOptions.includes(java) ? javaOptions : [java, ...javaOptions]} />
+          </Locked>
         </Row>
         <Row label="JVM flags" desc="Aikar’s G1GC flags tuned for modded servers.">
-          <TextInput icon={null} mono defaultValue="-XX:+UseG1GC -XX:MaxGCPauseMillis=200 …" className="w-[260px]" />
+          <Locked why={`Set JVM_FLAGS in ${envFile}`}>
+            <TextInput icon={null} mono defaultValue={s.jvmFlags || '-XX:+UseG1GC -XX:MaxGCPauseMillis=200 …'} title={s.jvmFlags} className="w-[260px]" />
+          </Locked>
         </Row>
       </SettingsGroup>
 
       <SettingsGroup title="Behavior">
         <Row label="Stop when empty" desc="Shut down after 10 minutes without players.">
-          <Switch checked={s.autoStop} onChange={(v) => patchServerSettings(s.id, { autoStop: v })} />
+          {IS_LIVE ? <Unavailable /> : <Switch checked={s.autoStop} onChange={(v) => patchServerSettings(s.id, { autoStop: v })} />}
         </Row>
         <Row label="Wake on player connection" desc="Keep a lightweight listener on the port and boot when someone joins.">
-          <Switch checked={s.wakeOnConnect} onChange={(v) => patchServerSettings(s.id, { wakeOnConnect: v })} />
+          {IS_LIVE ? <Unavailable /> : <Switch checked={s.wakeOnConnect} onChange={(v) => patchServerSettings(s.id, { wakeOnConnect: v })} />}
         </Row>
         <Row label="Back up before shutdown" desc="Snapshot the world whenever the server stops.">
-          <Switch checked={backupStop} onChange={setBackupStop} />
+          {IS_LIVE ? <Unavailable /> : <Switch checked={backupStop} onChange={setBackupStop} />}
         </Row>
       </SettingsGroup>
 
-      <SettingsGroup title="Gameplay" desc="Written to server.properties.">
+      <SettingsGroup title="Gameplay" desc={IS_LIVE ? 'Current values from server.properties.' : 'Written to server.properties.'}>
         <Row label="Difficulty">
-          <Segmented value={difficulty} onChange={setDifficulty} options={['Peaceful', 'Easy', 'Normal', 'Hard']} size="xs" />
+          <Locked>
+            <Segmented value={difficulty} onChange={setDifficulty} options={['Peaceful', 'Easy', 'Normal', 'Hard']} size="xs" />
+          </Locked>
         </Row>
         <Row label="Max players">
-          <Stepper value={maxPlayers} onChange={setMaxPlayers} min={1} max={50} />
+          <Locked>
+            <Stepper value={maxPlayers} onChange={setMaxPlayers} min={1} max={50} />
+          </Locked>
         </Row>
         <Row label="View distance" desc="Chunks sent to clients. Lower values save memory.">
-          <Stepper value={view} onChange={setView} min={4} max={32} suffix="ch" />
+          <Locked>
+            <Stepper value={view} onChange={setView} min={2} max={32} suffix="ch" />
+          </Locked>
         </Row>
         <Row label="Simulation distance">
-          <Stepper value={sim} onChange={setSim} min={4} max={32} suffix="ch" />
+          <Locked>
+            <Stepper value={sim} onChange={setSim} min={2} max={32} suffix="ch" />
+          </Locked>
         </Row>
         <Row label="Whitelist">
-          <Switch checked={whitelist} onChange={setWhitelist} />
+          <Locked>
+            <Switch checked={whitelist} onChange={setWhitelist} />
+          </Locked>
         </Row>
         <Row label="PvP">
-          <Switch checked={pvp} onChange={setPvp} />
+          <Locked>
+            <Switch checked={pvp} onChange={setPvp} />
+          </Locked>
         </Row>
       </SettingsGroup>
 
       <SettingsGroup title="Danger zone" danger>
         <Row label="Reset world" desc="Deletes the world folder. A backup is taken first.">
-          <Button variant="danger" size="sm" icon={RotateCcw} onClick={() => toast('World reset is disabled in the prototype', 'warn')}>
-            Reset world
-          </Button>
+          {IS_LIVE ? <Unavailable>Not available from the portal</Unavailable> : (
+            <Button variant="danger" size="sm" icon={RotateCcw} onClick={() => toast('World reset is disabled in the prototype', 'warn')}>
+              Reset world
+            </Button>
+          )}
         </Row>
         <Row label="Delete instance" desc="Removes the server directory and its tunnel.">
-          <Button variant="danger" size="sm" icon={Trash2} onClick={() => toast('Deleting instances is disabled in the prototype', 'warn')}>
-            Delete
-          </Button>
+          {IS_LIVE ? <Unavailable>Not available from the portal</Unavailable> : (
+            <Button variant="danger" size="sm" icon={Trash2} onClick={() => toast('Deleting instances is disabled in the prototype', 'warn')}>
+              Delete
+            </Button>
+          )}
         </Row>
       </SettingsGroup>
 

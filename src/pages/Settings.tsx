@@ -2,6 +2,9 @@ import { useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Archive, Bell, Info, Palette, ShieldCheck, SlidersHorizontal, Clock, type LucideIcon } from 'lucide-react';
 import { toast, updateSetting, useApp } from '../lib/store';
+import { IS_LIVE } from '../lib/mode';
+import { Badge } from '../ui/Status';
+import { Tooltip } from '../ui/Tooltip';
 import { cx } from '../lib/format';
 import { Button } from '../ui/Button';
 import { Segmented, Select, Slider, Stepper, Switch } from '../ui/Controls';
@@ -20,8 +23,20 @@ const sections: { id: Section; label: string; icon: LucideIcon }[] = [
 
 const times = Array.from({ length: 24 }, (_, h) => `${String(h).padStart(2, '0')}:00`);
 
+/** Live mode: a control that the backend does not implement yet is shown as such, never as a working toggle. */
+function Live({ children, label = 'Not available yet', tip }: { children: React.ReactNode; label?: string; tip?: string }) {
+  if (!IS_LIVE) return <>{children}</>;
+  const b = <Badge tone="neutral">{label}</Badge>;
+  return tip ? <Tooltip content={tip}>{b}</Tooltip> : b;
+}
+
 export function SettingsPage() {
   const st = useApp((s) => s.settings);
+  const host = useApp((s) => s.host);
+  const servers = useApp((s) => s.servers);
+  const schedule = useApp((s) => s.backupSchedule);
+  const conn = useApp((s) => s.conn);
+  const lanIp = host?.interfaces.find((i) => i.name === host.defaultIface)?.addresses[0]?.split('/')[0];
   const [sec, setSec] = useState<Section>('behavior');
 
   return (
@@ -72,48 +87,84 @@ export function SettingsPage() {
                 <>
                   <SettingsGroup title="Server behavior" desc="Keep the machine quiet when nobody is playing.">
                     <Row label="Auto-stop empty servers" desc="Stop a server once the last player leaves.">
-                      <Switch checked={st.autoStop} onChange={(v) => updateSetting('autoStop', v)} />
+                      <Live>
+                        <Switch checked={st.autoStop} onChange={(v) => updateSetting('autoStop', v)} />
+                      </Live>
                     </Row>
                     <Row label="Idle timeout" desc="How long an empty server keeps running.">
-                      <Select
-                        value={st.idleTimeout}
-                        onChange={(v) => updateSetting('idleTimeout', v)}
-                        icon={Clock}
-                        width={150}
-                        options={['5 minutes', '10 minutes', '15 minutes', '30 minutes', '1 hour']}
-                      />
+                      <Live>
+                        <Select
+                          value={st.idleTimeout}
+                          onChange={(v) => updateSetting('idleTimeout', v)}
+                          icon={Clock}
+                          width={150}
+                          options={['5 minutes', '10 minutes', '15 minutes', '30 minutes', '1 hour']}
+                        />
+                      </Live>
                     </Row>
                     <Row label="Wake on player connection" desc="Boot sleeping servers when a player joins through Playit.">
-                      <Switch checked={st.wakeOnConnect} onChange={(v) => updateSetting('wakeOnConnect', v)} />
+                      <Live>
+                        <Switch checked={st.wakeOnConnect} onChange={(v) => updateSetting('wakeOnConnect', v)} />
+                      </Live>
                     </Row>
                     <Row label="Backup before shutdown" desc="Snapshot the world each time a server stops.">
-                      <Switch checked={st.backupBeforeShutdown} onChange={(v) => updateSetting('backupBeforeShutdown', v)} />
+                      <Live>
+                        <Switch checked={st.backupBeforeShutdown} onChange={(v) => updateSetting('backupBeforeShutdown', v)} />
+                      </Live>
                     </Row>
                   </SettingsGroup>
                   <SettingsGroup title="Startup">
-                    <Row label="Start servers on boot" desc="Restore the servers that were running before a reboot.">
-                      <Switch checked={true} onChange={() => toast('Boot behavior is fixed in the prototype', 'info')} />
+                    <Row label="Start servers on boot" desc={IS_LIVE ? 'Per instance: systemctl enable wyzi-mc@<id> (admin).' : 'Restore the servers that were running before a reboot.'}>
+                      {IS_LIVE ? (
+                        <Badge tone="neutral">{servers.filter((x) => x.enabled).map((x) => x.name).join(', ') || 'None enabled'}</Badge>
+                      ) : (
+                        <Switch checked={true} onChange={() => toast('Boot behavior is fixed in the prototype', 'info')} />
+                      )}
                     </Row>
                     <Row label="Crash recovery" desc="Restart a server automatically after an unexpected exit.">
-                      <Segmented value="Once" onChange={() => toast('Saved', 'success')} options={['Off', 'Once', 'Always']} size="xs" />
+                      {IS_LIVE ? (
+                        <Tooltip content="wyzi-mc@.service: Restart=on-failure, 30 s delay, at most 3 starts per hour, then the unit stays failed">
+                          <Badge tone="neutral">systemd · max 3 / hour</Badge>
+                        </Tooltip>
+                      ) : (
+                        <Segmented value="Once" onChange={() => toast('Saved', 'success')} options={['Off', 'Once', 'Always']} size="xs" />
+                      )}
                     </Row>
                   </SettingsGroup>
                 </>
               )}
 
               {sec === 'backups' && (
-                <SettingsGroup title="Backups" desc="Written to /mnt/archive/backups on the HDD.">
+                <SettingsGroup title="Backups" desc="Written to /srv/storage/backups/minecraft on the bulk HDD.">
+                  {IS_LIVE && (
+                    <div className="px-5 py-3 text-xs text-fg-3">
+                      Schedules are systemd timers (<span className="font-mono text-fg-2">wyzi-backup@&lt;id&gt;.timer</span>) and retention lives in each instance's env file. Both
+                      need admin access to change, so they are shown read-only here.
+                      <div className="mt-2 space-y-1">
+                        {Object.entries(schedule).map(([id, x]) => (
+                          <div key={id} className="flex items-center gap-2">
+                            <span className="w-28 font-mono text-fg-2">{id}</span>
+                            <Badge tone={x.enabled ? 'mint' : 'neutral'}>{x.enabled ? 'Scheduled' : 'Not scheduled'}</Badge>
+                            <span className="num">keep {x.keep} scheduled · {x.keepManual} manual</span>
+                          </div>
+                        ))}
+                        {Object.keys(schedule).length === 0 && <span>No instances yet.</span>}
+                      </div>
+                    </div>
+                  )}
                   <Row label="Automatic backups" desc="Back up every server that ran in the last 24 hours.">
-                    <Switch checked={st.autoBackups} onChange={(v) => updateSetting('autoBackups', v)} />
+                    <Live label="Admin · systemd timer">
+                      <Switch checked={st.autoBackups} onChange={(v) => updateSetting('autoBackups', v)} />
+                    </Live>
                   </Row>
-                  <div className={cx('divide-y divide-line transition-opacity', !st.autoBackups && 'pointer-events-none opacity-40')}>
+                  <div className={cx('divide-y divide-line transition-opacity', (!st.autoBackups || IS_LIVE) && 'pointer-events-none opacity-40')}>
                     <Row label="Backup time" desc="Runs while players are least likely to be online.">
                       <Select value={st.backupTime} onChange={(v) => updateSetting('backupTime', v)} options={times} width={110} icon={Clock} />
                     </Row>
                     <Row label="Retain backups" desc="Older automatic backups are pruned. Manual backups are kept.">
                       <Stepper value={st.retainDays} onChange={(v) => updateSetting('retainDays', v)} min={1} max={90} suffix="days" />
                     </Row>
-                    <Row label="Compression">
+                    <Row label="Compression" desc={IS_LIVE ? 'zstd level 6, 2 threads (wyzi-backup).' : undefined}>
                       <Select value={st.compression} onChange={(v) => updateSetting('compression', v)} width={180} options={['zstd (fast)', 'zstd (balanced)', 'zstd (max)', 'None']} />
                     </Row>
                   </div>
@@ -126,7 +177,10 @@ export function SettingsPage() {
                     <div className="flex items-center justify-between">
                       <div>
                         <div className="text-sm">Memory headroom</div>
-                        <div className="text-xs text-fg-3">Kept free for the OS, page cache and JVM overhead. Servers that would eat into it are blocked.</div>
+                        <div className="text-xs text-fg-3">
+                          Amount of MemAvailable kept free for the OS and page cache after a server reaches its full heap + JVM overhead. Servers that would eat into it are blocked
+                          {IS_LIVE ? ' by the backend.' : '.'}
+                        </div>
                       </div>
                       <div className="num text-[20px] font-semibold tracking-tight">
                         {st.safetyHeadroom.toFixed(1)}
@@ -142,10 +196,12 @@ export function SettingsPage() {
                     </div>
                   </div>
                   <Row label="Ask before stopping another server" desc="Show the memory dialog instead of refusing outright.">
-                    <Switch checked={true} onChange={() => toast('Saved', 'success')} />
+                    {IS_LIVE ? <Badge tone="neutral">Always</Badge> : <Switch checked={true} onChange={() => toast('Saved', 'success')} />}
                   </Row>
                   <Row label="Warn on high CPU temperature" desc="Above 80°C for more than a minute.">
-                    <Switch checked={st.notifyLowMem} onChange={(v) => updateSetting('notifyLowMem', v)} />
+                    <Live>
+                      <Switch checked={st.notifyLowMem} onChange={(v) => updateSetting('notifyLowMem', v)} />
+                    </Live>
                   </Row>
                 </SettingsGroup>
               )}
@@ -153,16 +209,20 @@ export function SettingsPage() {
               {sec === 'appearance' && (
                 <SettingsGroup title="Appearance">
                   <Row label="Theme" desc="Graphite is the default.">
-                    <Segmented value={st.theme} onChange={(v) => { updateSetting('theme', v); if (v !== 'Graphite') toast('Only Graphite is designed so far', 'info'); }} options={['Graphite', 'Midnight', 'Light']} size="xs" />
+                    {IS_LIVE ? (
+                      <Badge tone="neutral">Graphite</Badge>
+                    ) : (
+                      <Segmented value={st.theme} onChange={(v) => { updateSetting('theme', v); if (v !== 'Graphite') toast('Only Graphite is designed so far', 'info'); }} options={['Graphite', 'Midnight', 'Light']} size="xs" />
+                    )}
                   </Row>
-                  <Row label="Compact mode" desc="Tighter rows in lists and settings.">
+                  <Row label="Compact mode" desc="Tighter rows in lists and settings. Saved in this browser.">
                     <Switch checked={st.compact} onChange={(v) => updateSetting('compact', v)} />
                   </Row>
-                  <Row label="Animations" desc="Transitions, chart reveals and status motion.">
+                  <Row label="Animations" desc="Transitions, chart reveals and status motion. Saved in this browser.">
                     <Switch checked={st.animations} onChange={(v) => updateSetting('animations', v)} />
                   </Row>
-                  <Row label="Accent" desc="Used for healthy and active states.">
-                    <div className="flex gap-1.5">
+                  <Row label="Accent" desc="Interactive accent. Healthy states always use green.">
+                    {IS_LIVE ? <Badge tone="blue">Slate blue</Badge> : <div className="flex gap-1.5">
                       {['#7AA2D9', '#8D97B0', '#9A92C8', '#9B9FA8'].map((c, i) => (
                         <button
                           key={c}
@@ -171,24 +231,26 @@ export function SettingsPage() {
                           style={{ background: c }}
                         />
                       ))}
-                    </div>
+                    </div>}
                   </Row>
                 </SettingsGroup>
               )}
 
               {sec === 'notifications' && (
-                <SettingsGroup title="Notifications" desc="Shown in the portal. Push delivery comes later.">
+                <SettingsGroup title="Notifications" desc={IS_LIVE ? 'In-portal toasts for open browser tabs. Push delivery is not built yet.' : 'Shown in the portal. Push delivery comes later.'}>
                   <Row label="Server crashed">
-                    <Switch checked={st.notifyCrash} onChange={(v) => updateSetting('notifyCrash', v)} />
+                    {IS_LIVE ? <Badge tone="neutral">Always shown</Badge> : <Switch checked={st.notifyCrash} onChange={(v) => updateSetting('notifyCrash', v)} />}
                   </Row>
                   <Row label="Backup finished">
-                    <Switch checked={st.notifyBackup} onChange={(v) => updateSetting('notifyBackup', v)} />
+                    {IS_LIVE ? <Badge tone="neutral">Always shown</Badge> : <Switch checked={st.notifyBackup} onChange={(v) => updateSetting('notifyBackup', v)} />}
                   </Row>
                   <Row label="Low memory">
-                    <Switch checked={st.notifyLowMem} onChange={(v) => updateSetting('notifyLowMem', v)} />
+                    <Live>
+                      <Switch checked={st.notifyLowMem} onChange={(v) => updateSetting('notifyLowMem', v)} />
+                    </Live>
                   </Row>
                   <Row label="Tunnel disconnected">
-                    <Switch checked={true} onChange={() => toast('Saved', 'success')} />
+                    {IS_LIVE ? <Badge tone="neutral">Logged</Badge> : <Switch checked={true} onChange={() => toast('Saved', 'success')} />}
                   </Row>
                 </SettingsGroup>
               )}
@@ -197,11 +259,14 @@ export function SettingsPage() {
                 <SettingsGroup title="About">
                   <div className="px-5 py-2">
                     <KV k="Application" v="WYZI Server" />
-                    <KV k="Version" v="0.1.0 · frontend prototype" mono />
-                    <KV k="Host" v="WYZI-SERVER · 192.168.1.40" mono />
-                    <KV k="Data" v="Simulated in the browser — no commands are executed" />
+                    <KV k="Version" v={IS_LIVE ? `${host?.portalVersion ?? '—'} · server-connected` : '0.2.0 · frontend prototype'} mono />
+                    <KV k="Host" v={`${host?.hostname ?? '—'} · ${lanIp ?? location.hostname}`} mono />
+                    <KV
+                      k="Data"
+                      v={IS_LIVE ? `Live from the FastAPI backend (${conn.state}). Privileged actions go through wyzi-helper.` : 'Simulated in the browser — no commands are executed'}
+                    />
                   </div>
-                  <Row label="Reset prototype state" desc="Reload to restore the original mock data.">
+                  <Row label={IS_LIVE ? 'Reload portal' : 'Reset prototype state'} desc={IS_LIVE ? 'Re-fetch everything from the server.' : 'Reload to restore the original mock data.'}>
                     <Button size="sm" variant="secondary" onClick={() => location.reload()}>
                       Reload
                     </Button>

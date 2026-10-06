@@ -25,13 +25,25 @@ import {
   type Server,
 } from '../lib/store';
 import { cx } from '../lib/format';
+import { IS_LIVE } from '../lib/mode';
 import { Button, IconButton } from '../ui/Button';
 import { Dropdown, type MenuItem } from '../ui/Menu';
 import { Spinner } from '../ui/Spinner';
 import { Tooltip } from '../ui/Tooltip';
 
+/* Prototype placeholders; live mode uses the address reported by the Playit bridge. */
 export const PUBLIC_HOST = 'example.gl.joinmc.link';
 export const PUBLIC_ADDRESS = `${PUBLIC_HOST}:28451`;
+
+/** The address players should type (bare hostname when Playit publishes an SRV record). */
+export function usePublicAddress() {
+  return useApp((st) => st.playit.copyAddress ?? (IS_LIVE ? null : PUBLIC_ADDRESS));
+}
+
+export function serverAddress(s: Server): string | null {
+  if (s.publicAddress) return s.publicAddress;
+  return !IS_LIVE && s.tunnelPort ? `${PUBLIC_HOST}:${s.tunnelPort}` : null;
+}
 
 export async function copyText(text: string) {
   try {
@@ -48,14 +60,25 @@ export async function copyText(text: string) {
   }
 }
 
-export async function copyAddress(addr = PUBLIC_ADDRESS) {
-  await copyText(addr);
-  toast('Address copied', 'success', addr);
+export async function copyAddress(addr?: string | null) {
+  const a = addr ?? useApp.getState().playit.copyAddress ?? (IS_LIVE ? null : PUBLIC_ADDRESS);
+  if (!a) {
+    toast('No public address yet', 'warn', 'The Playit tunnel has not reported an address');
+    return;
+  }
+  await copyText(a);
+  toast('Address copied', 'success', a);
 }
 
 export function serverMenu(s: Server): MenuItem[] {
   const live = s.status === 'running';
-  const idle = s.status === 'offline' || s.status === 'sleeping';
+  const idle = s.status === 'offline' || s.status === 'sleeping' || s.status === 'failed';
+  if (s.status === 'undeployed')
+    return [
+      { heading: s.name },
+      { label: 'Not deployed yet', icon: FolderOpen, disabled: true, onSelect: () => {} },
+    ];
+  const addr = serverAddress(s);
   return [
     { heading: s.name },
     { label: 'Open console', icon: Terminal, onSelect: () => navigate(`/servers/${s.id}/console`), shortcut: 'C' },
@@ -66,10 +89,16 @@ export function serverMenu(s: Server): MenuItem[] {
       ? { label: s.status === 'sleeping' ? 'Wake server' : 'Start server', icon: Play, onSelect: () => requestStart(s.id) }
       : { label: 'Restart', icon: RotateCw, disabled: !live, onSelect: () => restartServer(s.id) },
     { label: 'Back up now', icon: Archive, onSelect: () => { createBackup(s.id); toast('Backup started', 'info', s.name); } },
-    { label: 'Copy address', icon: Copy, disabled: !s.tunnelPort, onSelect: () => copyAddress(`${PUBLIC_HOST}:${s.tunnelPort}`) },
+    { label: 'Copy address', icon: Copy, disabled: !addr, onSelect: () => copyAddress(addr) },
     { separator: true },
     { label: 'Stop server', icon: Square, danger: true, disabled: !live, onSelect: () => stopServer(s.id) },
-    { label: 'Delete instance…', icon: Trash2, danger: true, onSelect: () => toast('Deleting instances is disabled in the prototype', 'warn') },
+    {
+      label: 'Delete instance…',
+      icon: Trash2,
+      danger: true,
+      disabled: IS_LIVE,
+      onSelect: () => toast('Deleting instances is disabled in the prototype', 'warn'),
+    },
   ];
 }
 
@@ -88,6 +117,14 @@ export function MoreMenu({ s, size = 'sm' }: { s: Server; size?: 'xs' | 'sm' }) 
 
 /** Start / Stop / Restart cluster that adapts to server state. */
 export function PowerActions({ s, size = 'sm', compact }: { s: Server; size?: 'xs' | 'sm' | 'md'; compact?: boolean }) {
+  if (s.status === 'undeployed')
+    return (
+      <Tooltip content={`Expected at ${s.path ?? '/srv/minecraft/instances/' + s.id}`}>
+        <Button size={size} variant="secondary" disabled className="min-w-[80px]">
+          Not deployed
+        </Button>
+      </Tooltip>
+    );
   if (s.status === 'running')
     return (
       <div className="flex items-center gap-1.5">

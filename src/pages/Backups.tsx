@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Archive, Check, ChevronDown, Download, FileArchive, MoreHorizontal, RotateCcw, Trash2, X } from 'lucide-react';
-import { BACKUP_STEPS, createBackup, toast, useApp, type Backup } from '../lib/store';
+import { BACKUP_STEPS, createBackup, isDeployed, requestRestore, toast, useApp, type Backup } from '../lib/store';
+import { IS_LIVE } from '../lib/mode';
+import { diskLabel } from '../lib/hooks';
 import { cx } from '../lib/format';
 import { Button, IconButton } from '../ui/Button';
 import { Meter } from '../ui/Charts';
@@ -16,11 +18,20 @@ export function Backups() {
   const backups = useApp((s) => s.backups);
   const servers = useApp((s) => s.servers);
   const job = useApp((s) => s.backupJob);
+  const schedule = useApp((s) => s.backupSchedule);
+  const bulkDisk = useApp((s) => s.storage?.volumes.find((v) => v.id === 'bulk')?.disk);
+  const deployed = servers.filter(isDeployed);
   const [filter, setFilter] = useState<string>('all');
   const list = backups.filter((b) => filter === 'all' || b.serverId === filter);
   const total = backups.filter((b) => b.status === 'success').reduce((a, b) => a + b.size, 0);
   const jobServer = job ? servers.find((s) => s.id === job.serverId) : null;
   const name = (id: string) => servers.find((s) => s.id === id)?.name ?? id;
+  const lastSize = (id: string) => backups.find((b) => b.serverId === id && b.status === 'success')?.size;
+  const sched = Object.values(schedule);
+  const next = sched.find((x) => x.enabled && x.next)?.next;
+  const keep = sched[0];
+  const serverCount = new Set(backups.map((b) => b.serverId)).size;
+  const lastOk = backups.find((b) => b.status === 'success');
 
   return (
     <div>
@@ -32,30 +43,39 @@ export function Backups() {
               width={240}
               items={[
                 { heading: 'Back up server' },
-                ...servers.map((s) => ({ label: s.name, hint: `~${(s.diskSize * 0.15).toFixed(1)} GB`, icon: Archive, onSelect: () => createBackup(s.id) })),
+                ...deployed.map((s) => ({ label: s.name, hint: lastSize(s.id) != null ? `~${lastSize(s.id)} GB` : s.diskSize ? `≤ ${s.diskSize} GB` : '', icon: Archive, onSelect: () => createBackup(s.id) })),
               ]}
               trigger={({ onClick }) => (
                 <Button variant="primary" icon={job ? undefined : Archive} loading={!!job} iconRight={job ? undefined : ChevronDown} onClick={onClick} disabled={!!job}>
-                  {job ? 'Backup running' : 'Create backup'}
+                  {job ? (job.kind === 'restore' ? 'Restore running' : 'Backup running') : 'Create backup'}
                 </Button>
               )}
             />
           }
         >
-          <span>Stored on 5 TB archive HDD</span>
+          <span>Stored on the {bulkDisk ? `${diskLabel(bulkDisk.sizeBytes)} ${bulkDisk.kind}` : 'bulk disk'} · /srv/storage/backups</span>
           <span className="h-3 w-px bg-line-3" />
-          <span>zstd · SHA-256 verified</span>
+          <span>zstd · SHA-256 checksum</span>
         </PageHeader>
       </Reveal>
 
       {/* summary strip */}
       <Reveal i={1}>
         <section className="surface grid grid-cols-2 overflow-hidden rounded-xl md:grid-cols-5 md:divide-x md:divide-line">
-          <Fig label="Snapshots" value={`${backups.length}`} sub="across 4 servers" />
-          <Fig label="Total size" value={`${total.toFixed(1)} GB`} sub="1.4 TB incl. history" />
-          <Fig label="Last success" value={backups.find((b) => b.status === 'success')?.when ?? '—'} sub={name(backups.find((b) => b.status === 'success')?.serverId ?? '')} small />
-          <Fig label="Next scheduled" value="Tomorrow 03:00" sub="Daily · all running servers" small />
-          <Fig label="Retention" value="14 days" sub="Manual backups kept forever" small />
+          <Fig label="Snapshots" value={`${backups.filter((b) => b.status === 'success').length}`} sub={`across ${serverCount} server${serverCount === 1 ? '' : 's'}`} />
+          <Fig label="Total size" value={`${total.toFixed(1)} GB`} sub="Compressed archives" />
+          <Fig label="Last success" value={lastOk?.when ?? '—'} sub={lastOk ? name(lastOk.serverId) : 'No backups yet'} small />
+          {IS_LIVE ? (
+            <>
+              <Fig label="Next scheduled" value={next ? next.replace(/^\w+ /, '').slice(0, 16) : 'Not scheduled'} sub={next ? 'wyzi-backup@ timer' : 'Timers are enabled per instance by an admin'} small />
+              <Fig label="Retention" value={keep ? `${keep.keep} scheduled` : '—'} sub={keep ? `${keep.keepManual} manual kept per server` : 'Per-instance setting'} small />
+            </>
+          ) : (
+            <>
+              <Fig label="Next scheduled" value="Tomorrow 03:00" sub="Daily · all running servers" small />
+              <Fig label="Retention" value="14 days" sub="Manual backups kept forever" small />
+            </>
+          )}
         </section>
       </Reveal>
 
@@ -74,11 +94,13 @@ export function Backups() {
                 <Monogram name={jobServer.name} size={34} tone="blue" />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2 text-sm font-medium">
-                    Backing up {jobServer.name}
-                    <Badge tone="blue">Manual</Badge>
+                    {job.kind === 'restore' ? 'Restoring' : 'Backing up'} {jobServer.name}
+                    <Badge tone="blue">{job.type}</Badge>
                   </div>
                   <div className="text-xs text-fg-3">
-                    /srv/minecraft/{jobServer.id} → /mnt/archive/backups/{jobServer.id}
+                    {job.kind === 'restore'
+                      ? `${job.archive ?? 'archive'} → /srv/minecraft/instances/${jobServer.id} (current files moved aside)`
+                      : `/srv/minecraft/instances/${jobServer.id} → /srv/storage/backups/minecraft/${jobServer.id}`}
                   </div>
                 </div>
                 <div className="num text-[24px] font-semibold tracking-tight">{Math.round(job.progress * 100)}%</div>
@@ -105,7 +127,7 @@ export function Backups() {
         <Segmented
           value={filter}
           onChange={setFilter}
-          options={[{ value: 'all', label: 'All servers' }, ...servers.map((s) => ({ value: s.id, label: s.name }))]}
+          options={[{ value: 'all', label: 'All servers' }, ...deployed.map((s) => ({ value: s.id, label: s.name }))]}
         />
       </Reveal>
 
@@ -143,10 +165,10 @@ export function Backups() {
 function BackupRow({ b, name }: { b: Backup; name: string }) {
   const items: MenuItem[] = [
     { heading: `${name} · ${b.when}` },
-    { label: 'Restore…', icon: RotateCcw, disabled: b.status !== 'success', onSelect: () => toast('Restore is disabled in the prototype', 'info') },
-    { label: 'Download archive', icon: Download, disabled: b.status !== 'success', onSelect: () => toast('Downloads are disabled in the prototype', 'info') },
+    { label: 'Restore…', icon: RotateCcw, disabled: b.status !== 'success', onSelect: () => requestRestore(b.serverId, b.id) },
+    { label: 'Download archive', icon: Download, disabled: IS_LIVE || b.status !== 'success', onSelect: () => toast('Downloads are disabled in the prototype', 'info') },
     { separator: true },
-    { label: 'Delete backup', icon: Trash2, danger: true, onSelect: () => toast('Deleting backups is disabled in the prototype', 'warn') },
+    { label: IS_LIVE ? 'Delete backup (retention handles cleanup)' : 'Delete backup', icon: Trash2, danger: true, disabled: IS_LIVE, onSelect: () => toast('Deleting backups is disabled in the prototype', 'warn') },
   ];
   const onCtx = useContextMenu(items);
   return (
@@ -178,9 +200,11 @@ function BackupRow({ b, name }: { b: Backup; name: string }) {
       <td className="num px-4 text-right text-fg-3">{b.duration}</td>
       <td className="px-4">
         {b.status === 'success' ? (
-          <span className="flex items-center gap-1.5 text-mint">
-            <Check size={13} /> Success
-          </span>
+          <Tooltip content={b.checksum === 'missing' ? 'Archive present, checksum file missing' : 'Archive + SHA-256 checksum present'}>
+            <span className={cx('flex items-center gap-1.5', b.checksum === 'missing' ? 'text-amber' : 'text-mint')}>
+              <Check size={13} /> {b.checksum === 'missing' ? 'No checksum' : 'Success'}
+            </span>
+          </Tooltip>
         ) : (
           <Tooltip content={b.note ?? 'Backup failed'}>
             <span className="flex items-center gap-1.5 text-[#ff8784]">
@@ -192,7 +216,7 @@ function BackupRow({ b, name }: { b: Backup; name: string }) {
       <td className="pr-3 text-right">
         <div className="flex items-center justify-end gap-1 opacity-60 transition-opacity group-hover:opacity-100">
           <Tooltip content="Restore">
-            <IconButton icon={RotateCcw} label="Restore" size="xs" disabled={b.status !== 'success'} onClick={() => toast('Restore is disabled in the prototype', 'info')} />
+            <IconButton icon={RotateCcw} label="Restore" size="xs" disabled={b.status !== 'success'} onClick={() => requestRestore(b.serverId, b.id)} />
           </Tooltip>
           <Dropdown items={items} trigger={({ onClick }) => <IconButton icon={MoreHorizontal} label="More" size="xs" onClick={onClick} />} />
         </div>
