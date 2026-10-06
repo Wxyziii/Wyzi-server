@@ -128,8 +128,35 @@ class HostCollector:
         f = mm.split()
         return {"size": int(size) / GB, "orig": int(f[0]) / GB, "compressed": int(f[1]) / GB}
 
+    @staticmethod
+    def sensors() -> tuple[list[dict], list[dict]]:
+        labels = {"coretemp": "CPU package", "pch_skylake": "Chipset (PCH)", "pch_cannonlake": "Chipset (PCH)", "nouveau": "GPU", "acpitz": "ACPI zone"}
+        temps: list[dict] = []
+        try:
+            for chip, entries in psutil.sensors_temperatures().items():
+                if chip == "coretemp":
+                    entries = [e for e in entries if e.label.startswith("Package")]
+                if entries:
+                    temps.append({"label": labels.get(chip, chip), "value": round(max(e.current for e in entries), 1)})
+        except (AttributeError, OSError):
+            pass
+        fans: list[dict] = []
+        try:
+            for chip, entries in (psutil.sensors_fans() or {}).items():
+                for e in entries:
+                    fans.append({"label": "GPU fan" if chip == "nouveau" else (e.label or chip), "rpm": e.current})
+        except (AttributeError, OSError):
+            pass
+        return temps, fans
+
     def snapshot(self) -> dict:
         m, s = self.mem, self.swap
+        temps, fans = self.sensors()
+        totals = {"rx": 0.0, "tx": 0.0}
+        for n, c in self._last_net.items():
+            if not n.startswith(_SKIP_NIC_PREFIX):
+                totals["rx"] += c.bytes_recv / GB
+                totals["tx"] += c.bytes_sent / GB
         return {
             "cpu": self.cpu,
             "cores": self.cores,
@@ -147,6 +174,9 @@ class HostCollector:
             "zram": self.zram,
             "disk": {d: {k: round(v, 2) for k, v in r.items()} for d, r in self.disk_rates.items()},
             "net": {n: {k: round(v, 3) for k, v in r.items()} for n, r in self.net_rates.items()},
+            "netTotals": {k: round(v, 2) for k, v in totals.items()},
+            "sensors": temps,
+            "fans": fans,
             "hist": {k: list(v) for k, v in self.hist.items()},
             "updatedAt": self.updated_at,
         }

@@ -27,6 +27,9 @@ from .rcon import RconError, RconSession
 log = logging.getLogger("wyzi.instances")
 
 STARTUP_STEPS = 6  # matches the frontend checklist
+# server.properties keys that are safe to show (never rcon.password / management secrets)
+PUBLIC_PROPS = ("difficulty", "gamemode", "max-players", "view-distance", "simulation-distance", "white-list",
+                "enforce-whitelist", "pvp", "online-mode", "motd", "level-name", "server-port", "enable-rcon", "rcon.port")
 UNIT_PROPS = ["Id", "ActiveState", "SubState", "MainPID", "Result", "NRestarts", "UnitFileState", "InactiveEnterTimestamp"]
 
 
@@ -75,6 +78,7 @@ class Instance:
         self.mc = "?"
         self.mods = 0
         self.ops: set[str] = set()
+        self.whitelist: list[str] = []
         self.java = "?"
         self.xmx = 0.0
         self.xms = 0.0
@@ -123,6 +127,10 @@ class Instance:
             self.ops = {o.get("name", "") for o in json.loads(_read(self.dir / "ops.json") or "[]")}
         except ValueError:
             self.ops = set()
+        try:
+            self.whitelist = sorted(o.get("name", "") for o in json.loads(_read(self.dir / "whitelist.json") or "[]"))
+        except ValueError:
+            self.whitelist = []
 
     def _detect_loader(self) -> tuple[str, str]:
         if self.env.get("LOADER") and self.env.get("MC_VERSION"):
@@ -254,6 +262,8 @@ class Instance:
                 "keepManual": int(self.env.get("BACKUP_KEEP_MANUAL", "20") or 20),
                 "excludes": self.env.get("BACKUP_EXCLUDES", ""),
             },
+            "whitelist": self.whitelist,
+            "properties": {k: self.props[k] for k in PUBLIC_PROPS if k in self.props},
             "hist": {k: [round(x, 2) for x in v] for k, v in self.hist.items()},
         }
 

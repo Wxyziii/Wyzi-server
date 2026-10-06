@@ -88,3 +88,35 @@ def test_check_start_blocks_and_stop_first_resolves():
     resolved = check_start(target, [running, target], MEM, 2.5, 0, {"big"})
     # 12 + 7 freed - 2.5 = 16.5 >= 7.2
     assert resolved["ok"]
+
+
+def test_files_confined_and_redacted(tmp_path):
+    from app.files import FileAccessError, list_dir, read_text
+
+    root = tmp_path / "inst"
+    (root / "config").mkdir(parents=True)
+    (root / "server.properties").write_text("motd=hi\nrcon.password=hunter2\nserver-port=25565\n")
+    (tmp_path / "outside.txt").write_text("nope")
+    bad_paths = ["../outside.txt", "config/../../outside.txt"]
+    try:
+        (root / "escape.txt").symlink_to(tmp_path / "outside.txt")
+        bad_paths.append("escape.txt")
+    except OSError:
+        pass  # symlinks need privileges on Windows; covered on Linux
+    names = [e["name"] for e in list_dir(root, "")["entries"]]
+    assert names[0] == "config" and "server.properties" in names
+    content = read_text(root, "server.properties")["content"]
+    assert "hunter2" not in content and "rcon.password=••••••" in content and "motd=hi" in content
+    for bad in bad_paths:
+        with pytest.raises(FileAccessError):
+            read_text(root, bad)
+
+
+def test_redact_empty_secret_does_not_eat_next_line():
+    from app.files import redact
+
+    text = "management-server-tls-keystore-password=\nmax-players=20\nrcon.password=abc\nmanagement-server-secret=xyz\n"
+    out = redact("server.properties", text)
+    assert "max-players=20" in out and "abc" not in out and "xyz" not in out
+    assert "management-server-tls-keystore-password=\n" in out
+    assert redact("a.json", '{"apiKey": "k1", "name": "x"}') == '{"apiKey": "••••••", "name": "x"}'

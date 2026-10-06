@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 from . import config, memory, storage, system
 from .backups import jobs, list_backups
 from .events import hub
+from .files import FileAccessError, list_dir, read_text
 from .helper import HelperError, run_helper
 from .hostinfo import host_info
 from .instances import manager
@@ -93,6 +94,7 @@ async def lifespan(app: FastAPI):
     await asyncio.to_thread(manager.discover)
     state["host"] = await asyncio.to_thread(host_info)
     hub.log("portal", "info", f"portal {config.PORTAL_VERSION} started · {len(manager.instances)} instance(s)")
+    hub.activity_event("Portal started", "system", f"{len(manager.instances)} instance(s) discovered")
     tasks = [asyncio.create_task(c()) for c in (sample_loop, slow_loop, measure_loop, manager.rcon_loop)]
     yield
     for t in tasks:
@@ -131,7 +133,7 @@ def memory_payload() -> dict:
 def tick_payload() -> dict:
     snap = collector.snapshot()
     return {
-        "sys": {k: snap[k] for k in ("cpu", "cores", "freqMhz", "temp", "load", "disk", "net", "hist", "updatedAt")},
+        "sys": {k: snap[k] for k in ("cpu", "cores", "freqMhz", "temp", "load", "disk", "net", "netTotals", "sensors", "fans", "hist", "updatedAt")},
         "memory": memory_payload(),
         "servers": manager.snapshot(state["playit"], settings.get("plannedInstances")),
         "playit": state["playit"],
@@ -303,6 +305,24 @@ async def instance_command(iid: str, body: CommandBody):
 @app.get("/api/instances/{iid}/console")
 async def instance_console(iid: str, lines: int = 400):
     return get_instance(iid).console.backlog(max(1, min(lines, 500)))
+
+
+@app.get("/api/instances/{iid}/files")
+async def instance_files(iid: str, path: str = ""):
+    inst = get_instance(iid)
+    try:
+        return await asyncio.to_thread(list_dir, inst.dir, path)
+    except FileAccessError as e:
+        raise HTTPException(e.status, str(e))
+
+
+@app.get("/api/instances/{iid}/files/content")
+async def instance_file_content(iid: str, path: str):
+    inst = get_instance(iid)
+    try:
+        return await asyncio.to_thread(read_text, inst.dir, path)
+    except FileAccessError as e:
+        raise HTTPException(e.status, str(e))
 
 
 @app.get("/api/backups")

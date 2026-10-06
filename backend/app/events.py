@@ -19,7 +19,7 @@ def clock(ts: float | None = None) -> str:
     return time.strftime("%H:%M:%S", time.localtime(ts or time.time()))
 
 
-@dataclass
+@dataclass(eq=False)  # identity hashing: clients live in a set
 class Client:
     queue: asyncio.Queue
     consoles: set[str] = field(default_factory=set)
