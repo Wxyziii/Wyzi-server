@@ -515,6 +515,7 @@ const SERVICES: { key: string; label: string; desc: string }[] = [
   { key: 'nature', label: 'Nature change', desc: '' },
   { key: 'ability', label: 'Ability change', desc: '' },
   { key: 'friendship', label: 'Max friendship', desc: '' },
+  { key: 'repair', label: 'Tool repair', desc: 'Per damaged item, full durability' },
 ];
 const RARITIES = ['common', 'uncommon', 'rare', 'ultra-rare', 'legendary'];
 
