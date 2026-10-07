@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
 import os
 import time
@@ -21,6 +22,7 @@ from .automation import automation, wire
 from .backups import jobs, list_backups
 from .events import hub
 from .files import FileAccessError, list_dir, read_text
+from . import modconfig
 from .helper import HelperError, run_helper
 from .hostinfo import host_info
 from .instances import manager
@@ -411,6 +413,45 @@ async def instance_file_content(iid: str, path: str):
         return await asyncio.to_thread(read_text, inst.dir, path)
     except FileAccessError as e:
         raise HTTPException(e.status, str(e))
+
+
+@app.get("/api/instances/{iid}/modconfig")
+async def modconfig_list(iid: str):
+    return modconfig.list_files(get_instance(iid))
+
+
+@app.get("/api/instances/{iid}/modconfig/{name}")
+async def modconfig_read(iid: str, name: str):
+    try:
+        return await asyncio.to_thread(modconfig.read_file, get_instance(iid), name)
+    except modconfig.ModConfigError as e:
+        raise HTTPException(e.status, str(e))
+
+
+@app.put("/api/instances/{iid}/modconfig/{name}")
+async def modconfig_write(iid: str, name: str, request: Request):
+    inst = get_instance(iid)
+    body = await request.body()
+    if len(body) > modconfig.MAX_BYTES:
+        raise HTTPException(413, "config file too large")
+    try:
+        value = json.loads(body)
+    except ValueError as e:
+        raise HTTPException(422, f"not valid JSON: {e}")
+    try:
+        await asyncio.to_thread(modconfig.write_file, inst, name, value)
+    except modconfig.ModConfigError as e:
+        raise HTTPException(e.status, str(e))
+    hub.log("portal", "info", f"gameplay config {name} of {iid} saved")
+    result = await modconfig.live_reload(inst)
+    hub.activity_event(f"{inst.name}: {modconfig.FILES[name]['label']} updated", "system", result["message"])
+    return {"ok": True, **result, "files": modconfig.list_files(inst)["files"]}
+
+
+@app.post("/api/instances/{iid}/modconfig/reload")
+async def modconfig_reload(iid: str):
+    inst = get_instance(iid)
+    return {**await modconfig.live_reload(inst), "files": modconfig.list_files(inst)["files"]}
 
 
 @app.get("/api/backups")

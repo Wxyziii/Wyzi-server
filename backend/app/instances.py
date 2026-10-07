@@ -259,6 +259,7 @@ class Instance:
             "path": str(self.dir),
             "service": self.service,
             "rcon": self.rcon_target is not None,
+            "modConfig": (self.dir / "config" / "wyzi-poke-portal").is_dir(),
             "backup": {
                 "keep": int(self.env.get("BACKUP_KEEP", "14") or 14),
                 "keepManual": int(self.env.get("BACKUP_KEEP_MANUAL", "20") or 20),

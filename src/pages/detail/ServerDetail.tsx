@@ -9,6 +9,7 @@ import {
   Settings2,
   Terminal,
   Users,
+  Wand2,
 } from 'lucide-react';
 import { navigate } from '../../lib/router';
 import { useEffect } from 'react';
@@ -22,6 +23,7 @@ import { StatusBadge } from '../../ui/Status';
 import { Tooltip } from '../../ui/Tooltip';
 import { copyAddress, monogramTone, MoreMenu, PowerActions, serverAddress, useServer } from '../shared';
 import { ConsoleView } from './Console';
+import { GameplayTab } from './Gameplay';
 import { BackupsTab, FilesTab, OverviewTab, PerformanceTab, PlayersTab, SettingsTab } from './Tabs';
 
 export function ServerDetail({ id, tab }: { id: string; tab: string }) {
@@ -54,6 +56,7 @@ export function ServerDetail({ id, tab }: { id: string; tab: string }) {
     { value: 'files', label: 'Files', icon: FolderTree },
     { value: 'performance', label: 'Performance', icon: BarChart3 },
     { value: 'backups', label: 'Backups', icon: Archive, count: backups.filter((b) => b.serverId === s.id).length },
+    ...(s.modConfig ? [{ value: 'gameplay', label: 'Gameplay', icon: Wand2 }] : []),
     { value: 'settings', label: 'Settings', icon: Settings2 },
   ];
 
@@ -135,6 +138,7 @@ export function ServerDetail({ id, tab }: { id: string; tab: string }) {
           {tab === 'files' && <FilesTab s={s} />}
           {tab === 'performance' && <PerformanceTab s={s} />}
           {tab === 'backups' && <BackupsTab s={s} />}
+          {tab === 'gameplay' && <GameplayTab s={s} />}
           {tab === 'settings' && <SettingsTab s={s} />}
         </motion.div>
       </AnimatePresence>

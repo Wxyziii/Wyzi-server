@@ -40,6 +40,8 @@ export interface Server {
   uptime: number;
   wakeOnConnect: boolean;
   autoStop: boolean;
+  /** POKÉ PORTAL config folder present (Gameplay tab) */
+  modConfig?: boolean;
   worldSize: string;
   diskSize: number;
   java: string;
