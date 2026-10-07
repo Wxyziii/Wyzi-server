@@ -323,6 +323,12 @@ async def put_automation(iid: str, values: dict):
     except ValueError as e:
         raise HTTPException(422, str(e))
     hub.log("portal", "info", f"automation settings changed for {iid}")
+    if values.get("wake", {}).get("enabled"):
+        # a joining player can only wake one server per port: hand wake-on-connect over to this one
+        for other in manager.instances.values():
+            if other.id != inst.id and other.port == inst.port and settings.instance(other.id)["wake"]["enabled"]:
+                settings.update_instance(other.id, {"wake": {"enabled": False}})
+                hub.log("portal", "info", f"wake-on-connect moved from {other.id} to {iid} (shared port {inst.port})")
     automation.empty_since.pop(inst.id, None)
     if "schedule" in values:
         # a newly enabled/changed schedule starts with the NEXT slot (catch-up is only for missed runs)
@@ -344,9 +350,7 @@ async def start_instance(iid: str, body: StartBody | None = None):
     for o in stop_first:
         if o.status not in ("running", "starting"):
             raise HTTPException(409, f"{o.name} is not running")
-    if wake.sleeping(inst.id):
-        lst = wake.listeners.pop(inst.id)
-        await lst.close()  # release the port for Minecraft
+    await wake.release_port(inst.port)  # any sleeping instance on this port lets go so Minecraft can bind it
     ok, check = await checked_start(inst, stop_first)
     if not ok:
         return JSONResponse(status_code=409, content={"code": "insufficient_memory", "serverId": iid, **check})

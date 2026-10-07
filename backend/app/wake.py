@@ -236,9 +236,7 @@ class WakeManager:
             return True, "The server is waking up. Rejoin in about 30 seconds."
         self.last_wake[inst.id] = now
         # release the port first so Minecraft can bind it
-        lst = self.listeners.pop(inst.id, None)
-        if lst:
-            await lst.close()
+        await self.release_port(inst.port)
         assert self.starter is not None
         ok, msg = await self.starter(inst, reason)
         if not ok:
@@ -247,10 +245,20 @@ class WakeManager:
         hub.log("portal", "info", f"{reason} → starting {inst.id}")
         return True, "Waking up — the server is starting.\nRejoin in about 30–60 seconds."
 
+    async def release_port(self, port: int) -> None:
+        """Close every wake listener on `port` (instances can share a port; only one runs at a time)."""
+        for iid, lst in list(self.listeners.items()):
+            if lst.port == port:
+                self.listeners.pop(iid, None)
+                await lst.close()
+
     async def reconcile(self) -> None:
         """Open/close listeners to match settings and instance state."""
-        for inst in list(manager.instances.values()):
-            want = settings.instance(inst.id)["wake"]["enabled"] and inst.status == "offline" and not inst.pending
+        insts = list(manager.instances.values())
+        # ports held by a server that is running, starting or stopping
+        busy = {i.port for i in insts if i.is_active or i.pending}
+        for inst in insts:
+            want = settings.instance(inst.id)["wake"]["enabled"] and inst.status == "offline" and not inst.pending and inst.port not in busy
             lst = self.listeners.get(inst.id)
             if want and lst and lst.port != inst.port:
                 await lst.close()

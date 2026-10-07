@@ -207,3 +207,25 @@ def test_wake_status_and_login():
 
     asyncio.run(run())
     assert calls == ["wake: Wyzi tried to join"]
+
+
+def test_release_port_closes_every_listener_on_that_port():
+    """Instances sharing a port: starting one must free the port held by another's wake listener."""
+    from app.wake import WakeManager
+
+    class Lst:
+        def __init__(self, port):
+            self.port, self.closed = port, False
+
+        async def close(self):
+            self.closed = True
+
+    async def run():
+        wm = WakeManager()
+        a, b, c = Lst(25565), Lst(25565), Lst(25570)
+        wm.listeners = {"fabric": a, "cobbleverse": b, "other": c}
+        await wm.release_port(25565)
+        assert a.closed and b.closed and not c.closed
+        assert list(wm.listeners) == ["other"]
+
+    asyncio.run(run())
