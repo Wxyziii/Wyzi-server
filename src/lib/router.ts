@@ -12,6 +12,7 @@ export function parse(hash: string): Route {
   const parts = hash.replace(/^#\/?/, '').split('/').filter(Boolean);
   const page = (parts[0] as Page) || 'dashboard';
   if (page === 'servers' && parts[1]) return { page, serverId: parts[1], tab: parts[2] ?? 'overview' };
+  if (page === 'settings' && parts[1]) return { page, tab: parts[1] };
   return { page };
 }
 

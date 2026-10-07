@@ -9,6 +9,7 @@ import { RestoreDialog } from './shell/RestoreDialog';
 import { CommandPalette } from './shell/CommandPalette';
 import { MenuHost } from './ui/Menu';
 import { Toaster } from './ui/Overlay';
+import { ErrorBoundary } from './ui/ErrorBoundary';
 import { ConnectionBanner } from './shell/ConnectionBanner';
 import { LoginScreen } from './shell/LoginScreen';
 import { Dashboard } from './pages/Dashboard';
@@ -97,7 +98,7 @@ export default function App() {
                   transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
                   className="mx-auto w-full max-w-[1480px] px-6 pt-6 pb-10 max-md:px-4"
                 >
-                  {page}
+                  <ErrorBoundary resetKey={key}>{page}</ErrorBoundary>
                 </motion.div>
               </AnimatePresence>
             </div>

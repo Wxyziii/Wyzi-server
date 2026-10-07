@@ -12,7 +12,8 @@ import { Row, SettingsGroup } from './detail/Tabs';
 /* Live-mode settings sections (server-connected). Prototype mode keeps the original page. */
 
 export function BehaviorSummary() {
-  const servers = useApp((s) => s.servers.filter(isDeployed));
+  // select the stable array, filter outside: a selector returning a new array loops forever
+  const servers = useApp((s) => s.servers).filter(isDeployed);
   return (
     <SettingsGroup title="Server behavior" desc="Configured per instance — open a server's Settings tab to change it.">
       {servers.length === 0 && <div className="px-5 py-4 text-sm text-fg-4">No deployed instances yet.</div>}

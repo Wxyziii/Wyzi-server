@@ -11,6 +11,7 @@ import { Button } from '../ui/Button';
 import { Segmented, Select, Slider, Stepper, Switch } from '../ui/Controls';
 import { KV, PageHeader, Reveal } from '../ui/Layout';
 import { Row, SettingsGroup } from './detail/Tabs';
+import { useRoute } from '../lib/router';
 
 type Section = 'behavior' | 'backups' | 'safety' | 'appearance' | 'notifications' | 'account' | 'about';
 const sections: { id: Section; label: string; icon: LucideIcon }[] = [
@@ -39,7 +40,12 @@ export function SettingsPage() {
   const schedule = useApp((s) => s.backupSchedule);
   const conn = useApp((s) => s.conn);
   const lanIp = host?.interfaces.find((i) => i.name === host.defaultIface)?.addresses[0]?.split('/')[0];
-  const [sec, setSec] = useState<Section>('behavior');
+  const route = useRoute();
+  const [sec, setSecState] = useState<Section>(() => (sections.some((x) => x.id === route.tab) ? (route.tab as Section) : 'behavior'));
+  const setSec = (s: Section) => {
+    setSecState(s);
+    history.replaceState(null, '', `#/settings/${s}`); // deep link without re-running the page transition
+  };
 
   return (
     <div>
