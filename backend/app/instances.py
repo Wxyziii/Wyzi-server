@@ -91,6 +91,7 @@ class Instance:
         self.started_at: float | None = None
         self.pending: str | None = None  # 'starting' | 'stopping' while a helper call is in flight
         self.reported_status = "offline"  # last status events were emitted for (ready flips between polls)
+        self.prev_sub = ""  # last systemd SubState seen (detects auto-restart crashes)
         self.pending_since = 0.0
         self.start_step = 0
         self.done_seen = False
@@ -296,6 +297,15 @@ class InstanceManager:
         self.ark_gb = 0.0
         self.ark_active: list[str] = []
         self._polls = 0
+        self.listeners: list = []  # callbacks(kind, inst, detail): "crash", "startFailed"
+        self.annotate = None  # optional callback(api_dict, inst) adding automation state
+
+    def _emit(self, kind: str, inst: "Instance", detail: str) -> None:
+        for cb in self.listeners:
+            try:
+                cb(kind, inst, detail)
+            except Exception:  # listeners must never break polling
+                log.exception("listener failed")
 
     # ───────────── discovery ─────────────
     def discover(self) -> None:
@@ -400,6 +410,14 @@ class InstanceManager:
             inst.pending = None
         if inst.pending == "stopping" and a in ("inactive", "failed"):
             inst.pending = None
+        sub = inst.unit.get("SubState", "")
+        if sub == "auto-restart" and inst.prev_sub != "auto-restart":
+            res = inst.unit.get("Result", "exit-code")
+            inst.console.push("error", f"systemd: process exited ({res}); restarting automatically")
+            hub.activity_event(f"{inst.name} crashed", "warn", f"{res} · restarting")
+            hub.log("system", "error", f"{inst.service} crashed: {res}; auto-restart")
+            self._emit("crash", inst, f"{res} (restarting automatically)")
+        inst.prev_sub = sub
         if prev_state in ("inactive", "failed") and a in ("activating", "active"):
             inst.done_seen = inst.ready = inst.rcon_ok = False
             inst.start_step = 1
@@ -416,6 +434,7 @@ class InstanceManager:
                 hub.activity_event(f"{inst.name} failed", "warn", f"systemd result: {res}")
                 hub.log("system", "error", f"{inst.service} failed: {res}")
                 hub.toast(f"{inst.name} stopped unexpectedly", "error", f"systemd result: {res}")
+                self._emit("crash", inst, res)
             else:
                 inst.console.push("sys", f"systemd: {inst.service} stopped")
                 hub.activity_event(f"{inst.name} stopped", "stop", f"Freed {inst.xmx:g} GB")
@@ -474,7 +493,13 @@ class InstanceManager:
 
     # ───────────── actions ─────────────
     def snapshot(self, playit: dict | None, planned_cfg: list[dict]) -> list[dict]:
-        return [i.to_api(playit) for i in sorted(self.instances.values(), key=lambda x: x.name)] + self.planned(planned_cfg)
+        out = []
+        for i in sorted(self.instances.values(), key=lambda x: x.name):
+            d = i.to_api(playit)
+            if self.annotate:
+                self.annotate(d, i)
+            out.append(d)
+        return out + self.planned(planned_cfg)
 
     async def start(self, inst: Instance, stop_first: list[Instance]) -> None:
         inst.pending, inst.pending_since, inst.start_step = "starting", time.time(), 0
@@ -492,6 +517,7 @@ class InstanceManager:
             inst.console.push("error", f"Start failed: {e}")
             hub.log("portal", "error", f"start {inst.id} failed: {e}")
             hub.toast(f"Could not start {inst.name}", "error", str(e))
+            self._emit("startFailed", inst, str(e))
 
     async def stop(self, inst: Instance, quiet: bool = False) -> None:
         inst.pending, inst.pending_since = "stopping", time.time()

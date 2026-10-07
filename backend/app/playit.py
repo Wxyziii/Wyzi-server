@@ -13,7 +13,7 @@ from .helper import systemctl_show
 STALE_AFTER = 120  # seconds without a bridge update -> data is stale
 
 
-async def playit_status(local_listening: set[int]) -> dict:
+async def playit_status(local_listening: set[int], sleeping: set[int] | None = None) -> dict:
     svc = await systemctl_show("playit.service", ["ActiveState", "SubState", "ExecMainStartTimestamp", "NRestarts"])
     service = svc.get("ActiveState", "unknown")
     out: dict = {
@@ -60,6 +60,8 @@ async def playit_status(local_listening: set[int]) -> dict:
             state = "offline"
         elif port in local_listening:
             state = "online"
+        elif sleeping and port in sleeping:
+            state = "sleeping"  # wake-on-connect listener answers on the local target
         else:
             state = "idle"  # tunnel is up but nothing is listening on the local target
         tunnels.append({

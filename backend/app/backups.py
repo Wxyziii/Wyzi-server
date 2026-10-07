@@ -15,7 +15,7 @@ from .events import hub
 from .helper import HelperError, run_cmd, run_helper
 from .instances import Instance, manager
 
-LABEL_TYPE = {"scheduled": "Automatic", "manual": "Manual", "pre-restore": "Pre-restore"}
+LABEL_TYPE = {"scheduled": "Automatic", "manual": "Manual", "pre-restore": "Pre-restore", "pre-stop": "Pre-stop"}
 BACKUP_STEPS = 7  # frontend checklist length
 
 
@@ -77,38 +77,59 @@ class BackupJobs:
         self.failed: list[dict] = []
         self.durations: dict[str, str] = {}
         self._task: asyncio.Task | None = None
+        self.on_failure: list = []  # callbacks(inst, label, error) — used by notifications
 
     def snapshot(self) -> dict | None:
         return self.job
 
-    async def start_manual(self, inst: Instance) -> None:
+    async def start(self, inst: Instance, label: str = "manual") -> asyncio.Future:
+        """Start a backup through wyzi-helper. Returns a future resolving to True/False
+        (archive written or not) so callers such as auto-stop and the scheduler can wait."""
+        if label not in ("manual", "scheduled", "pre-stop"):
+            raise HelperError("invalid backup label")
         if self.job:
             raise HelperError("another backup or restore is already running")
         before = {b["id"] for b in list_backups() if b["serverId"] == inst.id}
         prior = [b for b in list_backups() if b["serverId"] == inst.id]
         expected = prior[0]["bytes"] if prior else max(1, int((inst.disk_gb or 0.5) * 0.4 * 1024**3))
-        self.job = {"serverId": inst.id, "kind": "backup", "type": "Manual", "progress": 0.0, "step": 0, "startedAt": time.time()}
-        hub.log("backup", "info", f"job {inst.id} manual started")
+        kind = LABEL_TYPE.get(label, label.title())
+        self.job = {"serverId": inst.id, "kind": "backup", "type": kind, "label": label, "progress": 0.0, "step": 0, "startedAt": time.time()}
+        hub.log("backup", "info", f"job {inst.id} {label} started")
         if inst.status == "running":
             inst.console.push("sys", "Backup started · world saving paused while the archive is written")
         try:
-            await run_helper("backup", inst.id, timeout=30)
+            await run_helper("backup", inst.id, label, timeout=30)
         except HelperError as e:
             self.job = None
             hub.log("backup", "error", f"job {inst.id} could not start: {e}")
+            self._notify_failure(inst, label, str(e))
             raise
-        self._task = asyncio.create_task(self._watch(inst, before, expected))  # referenced via self._task
+        done: asyncio.Future = asyncio.get_running_loop().create_future()
+        self._task = asyncio.create_task(self._watch(inst, before, expected, label, done))  # referenced via self._task
+        return done
 
-    async def _watch(self, inst: Instance, before: set[str], expected: int) -> None:
+    async def start_manual(self, inst: Instance) -> None:
+        await self.start(inst, "manual")
+
+    def _notify_failure(self, inst: Instance, label: str, error: str) -> None:
+        for cb in self.on_failure:
+            try:
+                cb(inst, label, error)
+            except Exception:  # notifications must never break the job runner
+                pass
+
+    async def _watch(self, inst: Instance, before: set[str], expected: int, label: str, done: asyncio.Future) -> None:
         d = config.BACKUP_DIR / inst.id
         t0 = self.job["startedAt"] if self.job else time.time()
         seen_unit = False
+        ok = False
         try:
             while True:
                 await asyncio.sleep(1.0)
                 partial = next(iter(d.glob(".*.partial")), None) if d.is_dir() else None
                 new = [b for b in list_backups() if b["serverId"] == inst.id and b["id"] not in before]
-                units = await run_cmd(["systemctl", "list-units", "--all", "--no-legend", "--plain", f"wyzi-backup-manual-{inst.id}-*"])
+                # unit name: wyzi-backup-<label>-<id>-<UTC>
+                units = await run_cmd(["systemctl", "list-units", "--all", "--no-legend", "--plain", f"wyzi-backup-*-{inst.id}-2*"])
                 running = any(" active " in f" {ln} " or "activating" in ln for ln in units.splitlines())
                 seen_unit = seen_unit or running
                 job = self.job
@@ -123,11 +144,14 @@ class BackupJobs:
                     job.update(progress=1.0, step=6)
                     dur = time.time() - t0
                     self.durations[new[0]["id"]] = f"{int(dur // 60)}m {int(dur % 60):02d}s"
-                    hub.activity_event("Backup completed", "backup", f"{inst.name} · {new[0]['size']} GB")
-                    hub.log("backup", "info", f"job {inst.id} finished size={new[0]['size']}GiB sha256=ok")
-                    hub.toast("Backup completed", "success", f"{inst.name} · {new[0]['size']} GB written to /srv/storage")
+                    what = {"scheduled": "Scheduled backup", "pre-stop": "Pre-stop backup"}.get(label, "Backup")
+                    hub.activity_event(f"{what} completed", "backup", f"{inst.name} · {new[0]['size']} GB")
+                    hub.log("backup", "info", f"job {inst.id} {label} finished size={new[0]['size']}GiB sha256=ok")
+                    if label == "manual":
+                        hub.toast("Backup completed", "success", f"{inst.name} · {new[0]['size']} GB written to /srv/storage")
                     if inst.status == "running":
                         inst.console.push("sys", "Backup finished · world saving resumed")
+                    ok = True
                     return
                 elif new:
                     job.update(progress=0.97, step=5)
@@ -139,13 +163,16 @@ class BackupJobs:
                     raise HelperError("backup did not finish within an hour")
         except HelperError as e:
             self.failed.insert(0, {"id": f"failed-{int(t0)}", "serverId": inst.id, "when": _when(t0), "date": time.strftime("%Y-%m-%d %H:%M", time.localtime(t0)),
-                                   "ts": t0, "size": 0, "type": "Manual", "status": "failed", "duration": "—", "note": str(e), "checksum": "missing"})
+                                   "ts": t0, "size": 0, "type": LABEL_TYPE.get(label, label.title()), "status": "failed", "duration": "—", "note": str(e), "checksum": "missing"})
             hub.activity_event("Backup failed", "warn", f"{inst.name} · {e}")
-            hub.log("backup", "error", f"job {inst.id} failed: {e}")
+            hub.log("backup", "error", f"job {inst.id} {label} failed: {e}")
             hub.toast("Backup failed", "error", str(e))
+            self._notify_failure(inst, label, str(e))
         finally:
             await asyncio.sleep(0.6)
             self.job = None
+            if not done.done():
+                done.set_result(ok)
             hub.send({"type": "backups", "backups": self.all(), "job": None})
 
     async def _last_error(self, inst: Instance) -> str:
