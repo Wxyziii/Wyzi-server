@@ -29,6 +29,7 @@ FILES: dict[str, dict] = {
     "starter.json": {"label": "Starter", "kind": "object", "required": ["enabled", "kit"]},
     "spawn_boosts.json": {"label": "Spawn boosts", "kind": "object", "required": ["species", "shiny", "variant"]},
     "legendary_shop.json": {"label": "Legendary shop", "kind": "array", "required": []},
+    "selling.json": {"label": "Selling", "kind": "object", "required": ["pokemon", "items"]},
     "gym_tiers.json": {"label": "Gym difficulty tiers", "kind": "object", "required": ["tiers"]},
 }
 MAX_BYTES = 512 * 1024

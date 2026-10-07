@@ -10,10 +10,13 @@ It appears when `<instance>/config/wyzi-poke-portal/` exists.
 | Prices | `portal.json` | Pokémon service prices (shiny, IV, EV, nature, ability, friendship) |
 | | `spawn_boosts.json` | spawn / shiny / form boost offers, durations, prices, legendary cap |
 | | `legendary_shop.json` | summoning items, price, region needed to unlock |
+| Selling | `selling.json` | Pokémon sale prices (rarity, level, IVs, hidden ability, shiny multiplier, what may be sold) and the item sell list |
 | Starter | `starter.json` | first-starter perks (shiny, IVs, hidden ability) and the one-time starter kit + CobbleDollars |
 | Advanced | any of the above + `gym_tiers.json` | raw JSON editor |
 
 Rewards and prices are whole CobbleDollar amounts stored as strings.
+
+Item sell prices must stay below the CobbleDollars shop price for the same item; the mod rejects the file otherwise, because buying and reselling would create money.
 
 ## Saving is live
 

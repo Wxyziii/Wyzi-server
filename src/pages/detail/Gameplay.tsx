@@ -15,7 +15,7 @@ import { Row, SettingsGroup } from './Tabs';
    Every save is applied live with `/poke reload`; the mod validates each file and keeps the
    previous valid settings when a file is rejected. */
 
-type FileName = 'quests.json' | 'achievements.json' | 'portal.json' | 'starter.json' | 'spawn_boosts.json' | 'legendary_shop.json' | 'gym_tiers.json';
+type FileName = 'quests.json' | 'achievements.json' | 'portal.json' | 'starter.json' | 'spawn_boosts.json' | 'legendary_shop.json' | 'selling.json' | 'gym_tiers.json';
 type SaveResult = { applied: boolean; ok?: boolean; results: Record<string, string>; message: string };
 
 function useModFile<T>(server: Server, name: FileName) {
@@ -546,6 +546,132 @@ function PricesEditor({ server }: { server: Server }) {
   );
 }
 
+/* ═════════════════════ SELLING ═════════════════════ */
+
+type SellFile = {
+  pokemon: {
+    enabled: boolean;
+    rarityPrices: Record<string, string>;
+    unlistedPrice: string;
+    perLevel: string;
+    perPerfectIv: string;
+    hiddenAbilityBonus: string;
+    shinyPercent: number;
+    allowShiny: boolean;
+    allowLegendary: boolean;
+    blockStarter: boolean;
+  };
+  items: { enabled: boolean; prices: Record<string, string> };
+};
+const RARITY_LABEL: Record<string, string> = { common: 'Common', uncommon: 'Uncommon', rare: 'Rare', 'ultra-rare': 'Ultra rare', legendary: 'Legendary' };
+
+function SellingEditor({ server }: { server: Server }) {
+  const f = useModFile<SellFile>(server, 'selling.json');
+  const [newItem, setNewItem] = useState('');
+  const [filter, setFilter] = useState('');
+  if (!f.data) return <LoadState error={f.error} />;
+  const d = f.data;
+  const pk = (patch: Partial<SellFile['pokemon']>) => f.setData({ ...d, pokemon: { ...d.pokemon, ...patch } });
+  const it = (patch: Partial<SellFile['items']>) => f.setData({ ...d, items: { ...d.items, ...patch } });
+  const money1 = (v: string) => digits(v) || '0';
+  // example: a level 30 common Pokémon, no perfect IVs, normal ability
+  const example = Number(d.pokemon.rarityPrices.common ?? d.pokemon.unlistedPrice) + 30 * Number(d.pokemon.perLevel);
+  const items = Object.entries(d.items.prices).filter(([id]) => id.includes(filter.trim().toLowerCase()));
+  return (
+    <div className="space-y-5">
+      <ResultNote result={f.result} name="selling.json" />
+      <SettingsGroup title="Selling Pokémon" desc="Players sell party Pokémon from the Sell page; the price is shown before they confirm.">
+        <Row label="Allow selling Pokémon">
+          <Switch checked={d.pokemon.enabled} onChange={(v) => pk({ enabled: v })} />
+        </Row>
+        {Object.keys(RARITY_LABEL).map((r) => (
+          <Row key={r} label={`${RARITY_LABEL[r]} species`} desc={r === 'legendary' ? 'Legendary and mythical Pokémon' : 'Base price, by natural spawn rarity'}>
+            <TextInput icon={Coins} value={d.pokemon.rarityPrices[r] ?? ''} onChange={(e) => pk({ rarityPrices: { ...d.pokemon.rarityPrices, [r]: money1(e.target.value) } })} className="w-[160px]" />
+          </Row>
+        ))}
+        <Row label="Species that never spawn naturally" desc="Starters, fossils, event Pokémon">
+          <TextInput icon={Coins} value={d.pokemon.unlistedPrice} onChange={(e) => pk({ unlistedPrice: money1(e.target.value) })} className="w-[160px]" />
+        </Row>
+        <Row label="Per level">
+          <TextInput icon={Coins} value={d.pokemon.perLevel} onChange={(e) => pk({ perLevel: money1(e.target.value) })} className="w-[160px]" />
+        </Row>
+        <Row label="Per perfect IV (31)">
+          <TextInput icon={Coins} value={d.pokemon.perPerfectIv} onChange={(e) => pk({ perPerfectIv: money1(e.target.value) })} className="w-[160px]" />
+        </Row>
+        <Row label="Hidden ability bonus">
+          <TextInput icon={Coins} value={d.pokemon.hiddenAbilityBonus} onChange={(e) => pk({ hiddenAbilityBonus: money1(e.target.value) })} className="w-[160px]" />
+        </Row>
+        <Row label="Shiny multiplier" desc="Applied to the whole price">
+          <Stepper value={d.pokemon.shinyPercent} onChange={(v) => pk({ shinyPercent: v })} min={100} max={10000} step={50} suffix="%" />
+        </Row>
+        <Row label="Allow selling shinies">
+          <Switch checked={d.pokemon.allowShiny} onChange={(v) => pk({ allowShiny: v })} />
+        </Row>
+        <Row label="Allow selling legendaries">
+          <Switch checked={d.pokemon.allowLegendary} onChange={(v) => pk({ allowLegendary: v })} />
+        </Row>
+        <Row label="Protect the first starter" desc="It cannot be sold">
+          <Switch checked={d.pokemon.blockStarter} onChange={(v) => pk({ blockStarter: v })} />
+        </Row>
+        <div className="px-5 py-3 text-xs text-fg-4">
+          Example: a level 30 common Pokémon sells for <span className="num text-amber">{example.toLocaleString()} ₽</span>
+          {d.pokemon.allowShiny && <> · shiny <span className="num text-amber">{Math.floor((example * d.pokemon.shinyPercent) / 100).toLocaleString()} ₽</span></>}.
+          Pokémon holding an item, sent out or in battle cannot be sold, and players always keep one.
+        </div>
+      </SettingsGroup>
+
+      <SettingsGroup title="Selling items" desc="Only plain items (no name, enchantment or damage) from the inventory.">
+        <Row label="Allow selling items">
+          <Switch checked={d.items.enabled} onChange={(v) => it({ enabled: v })} />
+        </Row>
+        <div className="flex items-center gap-2 px-5 py-2.5">
+          <TextInput icon={null} value={filter} placeholder="Filter…" onChange={(e) => setFilter(e.target.value)} className="w-[200px]" />
+          <span className="text-2xs text-fg-4">{Object.keys(d.items.prices).length} items · price per single item</span>
+        </div>
+        {items.map(([id, price]) => (
+          <div key={id} className="flex items-center justify-between gap-4 px-5 py-2">
+            <span className="min-w-0 truncate font-mono text-[12px] text-fg-2">{id}</span>
+            <div className="flex shrink-0 items-center gap-2">
+              <TextInput icon={Coins} value={price} onChange={(e) => it({ prices: { ...d.items.prices, [id]: digits(e.target.value) || '1' } })} className="w-[140px]" />
+              <IconButton
+                icon={Trash2}
+                label="Remove"
+                size="xs"
+                onClick={() => {
+                  const next = { ...d.items.prices };
+                  delete next[id];
+                  it({ prices: next });
+                }}
+              />
+            </div>
+          </div>
+        ))}
+        <div className="flex items-center gap-2 px-5 py-3">
+          <TextInput icon={null} mono value={newItem} placeholder="minecraft:emerald" onChange={(e) => setNewItem(e.target.value.trim().toLowerCase())} className="w-[260px]" />
+          <Button
+            size="sm"
+            variant="secondary"
+            icon={Plus}
+            disabled={!/^[a-z0-9_.-]+:[a-z0-9_/.-]+$/.test(newItem) || newItem in d.items.prices || Object.keys(d.items.prices).length >= 256}
+            onClick={() => {
+              it({ prices: { ...d.items.prices, [newItem]: '10' } });
+              setNewItem('');
+              setFilter('');
+            }}
+          >
+            Add item
+          </Button>
+        </div>
+        <div className="px-5 pb-3 text-xs text-fg-4">
+          The server rejects unknown items and any price at or above what the CobbleDollars shop charges for the same item (that would let players print money).
+          Emeralds, food and potions are already bought by the CobbleDollars bank.
+        </div>
+      </SettingsGroup>
+      <SaveBar dirty={f.dirty} saving={f.saving} onSave={() => void f.save()} onReset={f.reset} label="selling" />
+    </div>
+  );
+}
+
 /* ═════════════════════ STARTER ═════════════════════ */
 
 type StarterFile = {
@@ -659,7 +785,7 @@ function AdvancedEditor({ server }: { server: Server }) {
             <Select
               value={name}
               onChange={(v) => setName(v as FileName)}
-              options={['gym_tiers.json', 'quests.json', 'achievements.json', 'portal.json', 'starter.json', 'spawn_boosts.json', 'legendary_shop.json']}
+              options={['gym_tiers.json', 'quests.json', 'achievements.json', 'portal.json', 'starter.json', 'spawn_boosts.json', 'legendary_shop.json', 'selling.json']}
               width={190}
             />
             <Button size="xs" variant="ghost" icon={RotateCcw} onClick={() => f.data !== null && setText(JSON.stringify(f.data, null, 2))}>
@@ -727,6 +853,7 @@ export function GameplayTab({ s }: { s: Server }) {
             { value: 'quests', label: 'Quests' },
             { value: 'achievements', label: 'Achievements' },
             { value: 'prices', label: 'Prices' },
+            { value: 'selling', label: 'Selling' },
             { value: 'starter', label: 'Starter' },
             { value: 'advanced', label: 'Advanced' },
           ]}
@@ -770,6 +897,7 @@ export function GameplayTab({ s }: { s: Server }) {
       {section === 'quests' && <ObjectivesEditor server={s} achievement={false} />}
       {section === 'achievements' && <ObjectivesEditor server={s} achievement />}
       {section === 'prices' && <PricesEditor server={s} />}
+      {section === 'selling' && <SellingEditor server={s} />}
       {section === 'starter' && <StarterEditor server={s} />}
       {section === 'advanced' && <AdvancedEditor server={s} />}
     </div>
