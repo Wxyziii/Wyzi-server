@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Bell, ChevronRight, PanelLeft, Wifi } from 'lucide-react';
+import { Bell, ChevronRight, LogOut, PanelLeft, Settings2, Wifi } from 'lucide-react';
+import { logout } from '../lib/live';
 import { navigate, type Route } from '../lib/router';
 import { useApp } from '../lib/store';
 import { IconButton } from '../ui/Button';
@@ -86,9 +87,30 @@ export function Topbar({ route, onToggle }: { route: Route; onToggle: () => void
             </span>
           )}
         />
-        <div className="ml-1 flex h-6 w-6 items-center justify-center rounded-full bg-gradient-to-b from-[#2a2b31] to-[#1b1c20] text-2xs font-semibold text-fg-2 shadow-[inset_0_0_0_1px_var(--color-line-4)]">
-          W
-        </div>
+        {conn.mode === 'live' ? (
+          <Dropdown
+            width={220}
+            items={[
+              { heading: 'Signed in as admin' },
+              { label: 'Account settings', icon: Settings2, onSelect: () => navigate('/settings') },
+              { separator: true },
+              { label: 'Sign out', icon: LogOut, onSelect: () => logout() },
+              { label: 'Sign out everywhere', icon: LogOut, danger: true, onSelect: () => logout(true) },
+            ]}
+            trigger={({ onClick }) => (
+              <button
+                onClick={onClick}
+                className="ml-1 flex h-6 w-6 items-center justify-center rounded-full bg-gradient-to-b from-[#2a2b31] to-[#1b1c20] text-2xs font-semibold text-fg-2 shadow-[inset_0_0_0_1px_var(--color-line-4)] hover:text-fg"
+              >
+                W
+              </button>
+            )}
+          />
+        ) : (
+          <div className="ml-1 flex h-6 w-6 items-center justify-center rounded-full bg-gradient-to-b from-[#2a2b31] to-[#1b1c20] text-2xs font-semibold text-fg-2 shadow-[inset_0_0_0_1px_var(--color-line-4)]">
+            W
+          </div>
+        )}
       </div>
     </div>
   );

@@ -62,8 +62,73 @@ function applyTick(d: any) {
   });
 }
 
+/* ───────────── auth ───────────── */
+
+/** Called for any 401: stop streaming and show the login screen. */
+function requireLogin(code?: string) {
+  generation++;
+  ws?.close();
+  ws = null;
+  if (refreshTimer) window.clearInterval(refreshTimer);
+  S({ auth: { state: code === 'setup_required' ? 'setup' : 'login' } });
+}
+
+async function checkAuth(): Promise<boolean> {
+  try {
+    const a = await api.get<{ configured: boolean; authenticated: boolean }>('/api/auth/state');
+    if (a.authenticated) {
+      S({ auth: { state: 'ok' } });
+      return true;
+    }
+    S({ auth: { state: a.configured ? 'login' : 'setup' } });
+    return false;
+  } catch (e) {
+    S((st) => ({ conn: { ...st.conn, state: 'offline', error: (e as Error).message } }));
+    return false;
+  }
+}
+
+export async function login(password: string): Promise<string | null> {
+  try {
+    await api.post('/api/auth/login', { password });
+  } catch (e) {
+    return e instanceof ApiError ? e.message : 'The server could not be reached';
+  }
+  S({ auth: { state: 'ok' } });
+  startStreams(++generation);
+  return null;
+}
+
+export async function logout(everywhere = false) {
+  try {
+    await api.post(everywhere ? '/api/auth/logout-all' : '/api/auth/logout');
+  } finally {
+    requireLogin();
+  }
+}
+
+export async function changePassword(current: string, next: string): Promise<string | null> {
+  try {
+    await api.post('/api/auth/password', { current, new: next });
+  } catch (e) {
+    return e instanceof ApiError ? e.message : 'The server could not be reached';
+  }
+  requireLogin();
+  toast('Password changed', 'success', 'Sign in again with the new password');
+  return null;
+}
+
+async function guarded<T>(p: Promise<T>): Promise<T> {
+  try {
+    return await p;
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 401) requireLogin(e.body?.code);
+    throw e;
+  }
+}
+
 async function loadSnapshot() {
-  const st = await api.get<any>('/api/state');
+  const st = await guarded(api.get<any>('/api/state'));
   applyTick(st);
   S((cur) => ({
     host: st.host,
@@ -72,6 +137,7 @@ async function loadSnapshot() {
     activity: st.activity as Activity[],
     logs: st.logs as LogEntry[],
     settings: { ...cur.settings, safetyHeadroom: st.settings?.safetyHeadroom ?? cur.settings.safetyHeadroom },
+    notify: st.settings?.notify ?? cur.notify,
     conn: { ...cur.conn, helper: st.capabilities?.helper ?? false },
   }));
   void refreshBackups();
@@ -79,7 +145,7 @@ async function loadSnapshot() {
 
 export async function refreshBackups() {
   try {
-    const b = await api.get<any>('/api/backups');
+    const b = await guarded(api.get<any>('/api/backups'));
     S({ backups: b.backups, backupSchedule: b.schedule ?? {} });
   } catch {
     /* connection state is handled by the socket */
@@ -148,24 +214,40 @@ function open() {
     loadSnapshot().catch(() => {});
   };
   sock.onmessage = (ev) => gen === generation && onMessage(ev);
-  sock.onclose = () => {
+  sock.onclose = (ev) => {
     // only the current socket of the current connect() may change connection state
     if (gen !== generation || ws !== sock) return;
     ws = null;
+    if (ev.code === 4401) {
+      void checkAuth().then((ok) => ok && gen === generation && startStreams(gen));
+      return;
+    }
     S((st) => ({ conn: { ...st.conn, state: 'offline', error: 'Connection to the server was lost' } }));
+    // a proxy may hide the 4401 code: if the session is gone, show the login instead of retrying forever
+    void api
+      .get<{ authenticated: boolean; configured: boolean }>('/api/auth/state')
+      .then((a) => gen === generation && !a.authenticated && requireLogin(a.configured ? 'login_required' : 'setup_required'))
+      .catch(() => {});
     const delay = Math.min(15000, 1000 * 2 ** retry++);
     window.setTimeout(() => gen === generation && open(), delay);
   };
 }
 
+let refreshTimer: number | undefined;
+
+function startStreams(gen: number) {
+  loadSnapshot().catch((e: Error) => gen === generation && !(e instanceof ApiError && e.status === 401) && S((st) => ({ conn: { ...st.conn, state: 'offline', error: e.message } })));
+  open();
+  if (refreshTimer) window.clearInterval(refreshTimer);
+  refreshTimer = window.setInterval(refreshBackups, 30000);
+}
+
 export function connect() {
   const gen = ++generation;
-  loadSnapshot().catch((e: Error) => gen === generation && S((st) => ({ conn: { ...st.conn, state: 'offline', error: e.message } })));
-  open();
-  const iv = window.setInterval(refreshBackups, 30000);
+  void checkAuth().then((ok) => ok && gen === generation && startStreams(gen));
   return () => {
     generation++; // invalidates this connection's socket and retry timers (StrictMode runs effects twice)
-    window.clearInterval(iv);
+    if (refreshTimer) window.clearInterval(refreshTimer);
     ws?.close();
     ws = null;
   };
@@ -185,6 +267,7 @@ export function subscribeConsole(id: string) {
 /* ───────────── actions ───────────── */
 
 function fail(title: string, e: unknown) {
+  if (e instanceof ApiError && e.status === 401) return requireLogin(e.body?.code);
   const msg = e instanceof ApiError ? e.message : 'The server could not be reached';
   toast(title, 'error', msg);
 }
@@ -269,5 +352,53 @@ export async function saveServerSetting(key: 'safetyHeadroom', value: number) {
     await api.put('/api/settings', { [key]: value });
   } catch (e) {
     fail('Setting was not saved', e);
+  }
+}
+
+/* ───────────── automation + notifications ───────────── */
+
+export async function saveAutomation(id: string, patch: Record<string, unknown>) {
+  try {
+    const cfg = await api.put<any>(`/api/instances/${enc(id)}/automation`, patch);
+    S((st) => ({ servers: st.servers.map((x) => (x.id === id ? { ...x, automation: cfg } : x)) }));
+    return true;
+  } catch (e) {
+    fail('Setting was not saved', e);
+    return false;
+  }
+}
+
+export async function saveNotify(patch: Record<string, unknown>) {
+  try {
+    const all = await api.put<any>('/api/settings', { notify: patch });
+    S({ notify: all.notify });
+    return true;
+  } catch (e) {
+    fail('Notification setting was not saved', e);
+    return false;
+  }
+}
+
+export async function saveNotifySecrets(body: { topic?: string; token?: string; clearToken?: boolean }) {
+  try {
+    const n = await api.put<any>('/api/notify/secrets', body);
+    S({ notify: n });
+    return true;
+  } catch (e) {
+    fail('Not saved', e);
+    return false;
+  }
+}
+
+export async function testNotify(): Promise<string | null> {
+  try {
+    await api.post('/api/notify/test');
+    return null;
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 401) {
+      requireLogin(e.body?.code);
+      return 'Signed out';
+    }
+    return e instanceof ApiError ? e.message : 'The server could not be reached';
   }
 }

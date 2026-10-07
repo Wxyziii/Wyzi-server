@@ -182,7 +182,7 @@ export function ServerRow({ s }: { s: Server }) {
           </div>
           <Meter className="mt-1.5" value={s.ramUsed} max={s.ramAlloc || 1} tone={s.status === 'starting' || s.ramUsed / s.ramAlloc > 0.95 ? 'amber' : 'slate'} height={3} />
           <div className="mt-1 truncate text-2xs text-fg-4">
-            {live ? `Up ${fmtUptime(s.uptime)}` : s.status === 'undeployed' ? 'Awaiting deployment' : s.status === 'failed' ? (s.lastError ?? 'Exited unexpectedly') : s.status === 'sleeping' ? (s.wakeOnConnect ? 'Wake-on-connect enabled' : 'Sleeping') : s.status === 'starting' ? 'Allocating…' : `Last online ${s.lastOnline}`}
+            {live ? `Up ${fmtUptime(s.uptime)}${s.autoStopping ? ' · auto-stopping' : s.autoStopAt ? ` · auto-stop in ${Math.max(1, Math.round((s.autoStopAt - Date.now() / 1000) / 60))} min` : ''}` : s.status === 'undeployed' ? 'Awaiting deployment' : s.status === 'failed' ? (s.lastError ?? 'Exited unexpectedly') : s.status === 'sleeping' ? (s.wakeOnConnect ? 'Wake-on-connect enabled' : 'Sleeping') : s.status === 'starting' ? 'Allocating…' : `Last online ${s.lastOnline}`}
           </div>
         </div>
         <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>

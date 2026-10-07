@@ -97,7 +97,9 @@ export function Dashboard() {
 
   const lastBackup = backups.find((b) => b.status === 'success');
   const backupTarget = servers.find((x) => x.status === 'running') ?? servers.find(isDeployed);
-  const nextScheduled = Object.values(schedule).find((x) => x.enabled && x.next)?.next;
+  const nextTs = servers.map((x) => x.backupSchedule?.next).filter((x): x is number => !!x).sort((a, b) => a - b)[0];
+  const nextScheduled = nextTs ? new Date(nextTs * 1000).toLocaleString(undefined, { weekday: 'short', hour: '2-digit', minute: '2-digit' }) : undefined;
+  void schedule;
   const bulkBackups = bulkVol?.categories.find((c) => c.label === 'Minecraft backups')?.bytes ?? 0;
 
   return (
@@ -396,7 +398,7 @@ export function Dashboard() {
               <div className="mt-3 border-t border-line pt-3">
                 <div className="flex items-center justify-between text-xs">
                   <span className="text-fg-3">Next scheduled</span>
-                  <span className="num text-fg-2">{IS_LIVE ? (nextScheduled ? nextScheduled.replace(/^\w+ /, '').slice(0, 16) : 'Not scheduled') : 'Tomorrow 03:00'}</span>
+                  <span className="num text-fg-2">{IS_LIVE ? nextScheduled ?? 'Not scheduled' : 'Tomorrow 03:00'}</span>
                 </div>
                 <div className="mt-2 flex items-center justify-between text-xs">
                   <span className="text-fg-3">Backups on bulk HDD</span>

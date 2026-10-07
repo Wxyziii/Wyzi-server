@@ -27,9 +27,10 @@ export function Backups() {
   const jobServer = job ? servers.find((s) => s.id === job.serverId) : null;
   const name = (id: string) => servers.find((s) => s.id === id)?.name ?? id;
   const lastSize = (id: string) => backups.find((b) => b.serverId === id && b.status === 'success')?.size;
-  const sched = Object.values(schedule);
-  const next = sched.find((x) => x.enabled && x.next)?.next;
-  const keep = sched[0];
+  void schedule;
+  const nextTs = servers.map((x) => x.backupSchedule?.next).filter((x): x is number => !!x).sort((a, b) => a - b)[0];
+  const next = nextTs ? new Date(nextTs * 1000).toLocaleString(undefined, { weekday: 'short', hour: '2-digit', minute: '2-digit' }) : undefined;
+  const keep = deployed[0]?.backup;
   const serverCount = new Set(backups.map((b) => b.serverId)).size;
   const lastOk = backups.find((b) => b.status === 'success');
 
@@ -67,8 +68,8 @@ export function Backups() {
           <Fig label="Last success" value={lastOk?.when ?? '—'} sub={lastOk ? name(lastOk.serverId) : 'No backups yet'} small />
           {IS_LIVE ? (
             <>
-              <Fig label="Next scheduled" value={next ? next.replace(/^\w+ /, '').slice(0, 16) : 'Not scheduled'} sub={next ? 'wyzi-backup@ timer' : 'Timers are enabled per instance by an admin'} small />
-              <Fig label="Retention" value={keep ? `${keep.keep} scheduled` : '—'} sub={keep ? `${keep.keepManual} manual kept per server` : 'Per-instance setting'} small />
+              <Fig label="Next scheduled" value={next ?? 'Not scheduled'} sub={next ? 'Portal scheduler' : 'Enable in a server’s Settings tab'} small />
+              <Fig label="Retention" value={keep ? `${keep.keep} scheduled` : '—'} sub={keep ? `${keep.keepManual} manual · 5 pre-stop per server` : 'Per-instance setting'} small />
             </>
           ) : (
             <>

@@ -216,8 +216,8 @@ function TunnelRow({ name, id, port, tunnelPort, status, ok, wake }: { name: str
 function LiveTunnelRow({ t, server }: { t: PlayitTunnel; server?: import('../lib/types').Server }) {
   const [copied, setCopied] = useState(false);
   const addr = t.copyAddress ?? t.publicAddress;
-  const tone = t.state === 'online' ? 'mint' : t.state === 'idle' ? 'blue' : t.state === 'disabled' ? 'neutral' : 'amber';
-  const label = { online: 'Forwarding', idle: 'Idle · server stopped', offline: 'Agent offline', disabled: 'Disabled' }[t.state];
+  const tone = t.state === 'online' ? 'mint' : t.state === 'idle' || t.state === 'sleeping' ? 'blue' : t.state === 'disabled' ? 'neutral' : 'amber';
+  const label = { online: 'Forwarding', idle: 'Idle · server stopped', sleeping: 'Wake proxy · sleeping', offline: 'Agent offline', disabled: 'Disabled' }[t.state];
   return (
     <div className="grid grid-cols-[minmax(160px,1fr)_minmax(200px,1.4fr)_minmax(110px,0.6fr)_100px_auto] items-center gap-4 border-b border-line px-4 py-3 last:border-0 hover:bg-white/[0.015] max-lg:grid-cols-[1fr_auto]">
       <button onClick={() => server && navigate(`/servers/${server.id}`)} className="flex min-w-0 items-center gap-2.5 text-left">

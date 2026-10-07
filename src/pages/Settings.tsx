@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Archive, Bell, Info, Palette, ShieldCheck, SlidersHorizontal, Clock, type LucideIcon } from 'lucide-react';
+import { Archive, Bell, Info, Palette, ShieldCheck, SlidersHorizontal, Clock, UserRound, type LucideIcon } from 'lucide-react';
+import { AccountLive, BehaviorSummary, NotificationsLive } from './SettingsLive';
 import { toast, updateSetting, useApp } from '../lib/store';
 import { IS_LIVE } from '../lib/mode';
 import { Badge } from '../ui/Status';
@@ -11,13 +12,14 @@ import { Segmented, Select, Slider, Stepper, Switch } from '../ui/Controls';
 import { KV, PageHeader, Reveal } from '../ui/Layout';
 import { Row, SettingsGroup } from './detail/Tabs';
 
-type Section = 'behavior' | 'backups' | 'safety' | 'appearance' | 'notifications' | 'about';
+type Section = 'behavior' | 'backups' | 'safety' | 'appearance' | 'notifications' | 'account' | 'about';
 const sections: { id: Section; label: string; icon: LucideIcon }[] = [
   { id: 'behavior', label: 'Server behavior', icon: SlidersHorizontal },
   { id: 'backups', label: 'Backups', icon: Archive },
   { id: 'safety', label: 'Resource safety', icon: ShieldCheck },
   { id: 'appearance', label: 'Appearance', icon: Palette },
   { id: 'notifications', label: 'Notifications', icon: Bell },
+  ...(IS_LIVE ? [{ id: 'account' as Section, label: 'Account', icon: UserRound }] : []),
   { id: 'about', label: 'About', icon: Info },
 ];
 
@@ -83,7 +85,8 @@ export function SettingsPage() {
               transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
               className="space-y-6"
             >
-              {sec === 'behavior' && (
+              {sec === 'behavior' && IS_LIVE && <BehaviorSummary />}
+              {sec === 'behavior' && !IS_LIVE && (
                 <>
                   <SettingsGroup title="Server behavior" desc="Keep the machine quiet when nobody is playing.">
                     <Row label="Auto-stop empty servers" desc="Stop a server once the last player leaves.">
@@ -138,22 +141,20 @@ export function SettingsPage() {
                 <SettingsGroup title="Backups" desc="Written to /srv/storage/backups/minecraft on the bulk HDD.">
                   {IS_LIVE && (
                     <div className="px-5 py-3 text-xs text-fg-3">
-                      Schedules are systemd timers (<span className="font-mono text-fg-2">wyzi-backup@&lt;id&gt;.timer</span>) and retention lives in each instance's env file. Both
-                      need admin access to change, so they are shown read-only here.
+                      Schedules and pre-stop backups are set per instance (server → Settings). Retention comes from each instance's env file.
                       <div className="mt-2 space-y-1">
-                        {Object.entries(schedule).map(([id, x]) => (
-                          <div key={id} className="flex items-center gap-2">
-                            <span className="w-28 font-mono text-fg-2">{id}</span>
-                            <Badge tone={x.enabled ? 'mint' : 'neutral'}>{x.enabled ? 'Scheduled' : 'Not scheduled'}</Badge>
-                            <span className="num">keep {x.keep} scheduled · {x.keepManual} manual</span>
+                        {servers.filter((x) => x.automation).map((x) => (
+                          <div key={x.id} className="flex items-center gap-2">
+                            <span className="w-28 font-mono text-fg-2">{x.id}</span>
+                            <Badge tone={x.automation!.schedule.enabled ? 'mint' : 'neutral'}>{x.automation!.schedule.enabled ? `Daily ${x.automation!.schedule.time}` : 'Not scheduled'}</Badge>
+                            <span className="num">keep {x.backup?.keep ?? 14} scheduled · {x.backup?.keepManual ?? 20} manual · 5 pre-stop</span>
                           </div>
                         ))}
-                        {Object.keys(schedule).length === 0 && <span>No instances yet.</span>}
                       </div>
                     </div>
                   )}
                   <Row label="Automatic backups" desc="Back up every server that ran in the last 24 hours.">
-                    <Live label="Admin · systemd timer">
+                    <Live label="Per instance">
                       <Switch checked={st.autoBackups} onChange={(v) => updateSetting('autoBackups', v)} />
                     </Live>
                   </Row>
@@ -236,7 +237,9 @@ export function SettingsPage() {
                 </SettingsGroup>
               )}
 
-              {sec === 'notifications' && (
+              {sec === 'notifications' && IS_LIVE && <NotificationsLive />}
+              {sec === 'account' && <AccountLive />}
+              {sec === 'notifications' && !IS_LIVE && (
                 <SettingsGroup title="Notifications" desc={IS_LIVE ? 'In-portal toasts for open browser tabs. Push delivery is not built yet.' : 'Shown in the portal. Push delivery comes later.'}>
                   <Row label="Server crashed">
                     {IS_LIVE ? <Badge tone="neutral">Always shown</Badge> : <Switch checked={st.notifyCrash} onChange={(v) => updateSetting('notifyCrash', v)} />}

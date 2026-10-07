@@ -19,6 +19,7 @@ import type {
   RamConflict,
   Server,
   Settings,
+  NotifySettings,
   StorageInfo,
   SysMetrics,
   Toast,
@@ -54,6 +55,9 @@ export const BACKUP_STEPS = [
 
 export interface State {
   conn: Connection;
+  /** live mode login gate; mock mode is always 'ok' */
+  auth: { state: 'unknown' | 'ok' | 'login' | 'setup' };
+  notify: NotifySettings | null;
   host: HostInfo | null;
   servers: Server[];
   consoles: Record<string, ConsoleLine[]>;
@@ -111,6 +115,8 @@ const emptyMemory: MemoryInfo = {
 function liveInitial(): State {
   return {
     conn: { mode: 'live', state: 'connecting', error: null, lastSeen: null },
+    auth: { state: 'unknown' },
+    notify: null,
     host: null,
     servers: [],
     consoles: {},
@@ -136,6 +142,11 @@ let uid = 1;
 function mockInitial(): State {
   return {
     conn: { mode: 'mock', state: 'online', helper: true },
+    auth: { state: 'ok' },
+    notify: {
+      enabled: false, server: 'https://ntfy.sh', portalUrl: 'http://192.168.1.2:8080', diskPercent: 90, cooldownMinutes: 30, configured: false, hasToken: false,
+      events: { crash: true, startFailed: true, backupFailed: true, diskPressure: true, ramPressure: true, smart: true, playitOffline: true, autoStop: false, wake: false },
+    },
     host: mockHost,
     servers: initialServers,
     consoles: { 'prominence-ii': prominenceLog, cobblemon: [], vanilla: [], skyfactory: [] },

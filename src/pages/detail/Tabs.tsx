@@ -49,6 +49,7 @@ import { Dropdown, useContextMenu } from '../../ui/Menu';
 import { Badge } from '../../ui/Status';
 import { Tooltip } from '../../ui/Tooltip';
 import { StartupSequence } from '../shared';
+import { AutomationSettings } from './Automation';
 
 const EMPTY: ConsoleLine[] = [];
 
@@ -883,6 +884,9 @@ export function SettingsTab({ s }: { s: Server }) {
         </Row>
       </SettingsGroup>
 
+      {IS_LIVE ? (
+        <AutomationSettings s={s} />
+      ) : (
       <SettingsGroup title="Behavior">
         <Row label="Stop when empty" desc="Shut down after 10 minutes without players.">
           {IS_LIVE ? <Unavailable /> : <Switch checked={s.autoStop} onChange={(v) => patchServerSettings(s.id, { autoStop: v })} />}
@@ -894,6 +898,7 @@ export function SettingsTab({ s }: { s: Server }) {
           {IS_LIVE ? <Unavailable /> : <Switch checked={backupStop} onChange={setBackupStop} />}
         </Row>
       </SettingsGroup>
+      )}
 
       <SettingsGroup title="Gameplay" desc={IS_LIVE ? 'Current values from server.properties.' : 'Written to server.properties.'}>
         <Row label="Difficulty">

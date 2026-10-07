@@ -10,6 +10,7 @@ import { CommandPalette } from './shell/CommandPalette';
 import { MenuHost } from './ui/Menu';
 import { Toaster } from './ui/Overlay';
 import { ConnectionBanner } from './shell/ConnectionBanner';
+import { LoginScreen } from './shell/LoginScreen';
 import { Dashboard } from './pages/Dashboard';
 import { Servers } from './pages/Servers';
 import { ServerDetail } from './pages/detail/ServerDetail';
@@ -66,6 +67,15 @@ export default function App() {
       logs: <Logs />,
       settings: <SettingsPage />,
     }[route.page] ?? <Dashboard />;
+
+  const authState = useApp((s) => s.auth.state);
+  if (authState !== 'ok')
+    return (
+      <MotionConfig reducedMotion={animations ? 'never' : 'always'}>
+        <LoginScreen />
+        <Toaster />
+      </MotionConfig>
+    );
 
   return (
     <MotionConfig reducedMotion={animations ? 'never' : 'always'}>

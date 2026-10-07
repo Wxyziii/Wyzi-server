@@ -55,6 +55,11 @@ export interface Server {
   rcon?: boolean;
   backup?: { keep: number; keepManual: number; excludes: string };
   whitelist?: string[];
+  automation?: InstanceAutomation;
+  /** unix seconds when auto-stop will trigger (only while running and empty) */
+  autoStopAt?: number | null;
+  autoStopping?: boolean;
+  backupSchedule?: InstanceAutomation['schedule'] & { next: number | null; last: number | null };
   /** safe subset of server.properties (no secrets) */
   properties?: Record<string, string>;
   hist: { tps: number[]; mspt: number[]; cpu: number[]; ram: number[]; players: number[] };
@@ -203,6 +208,26 @@ export interface HostInfo {
   portalVersion: string;
 }
 
+export interface InstanceAutomation {
+  autoStop: { enabled: boolean; minutes: number; backupFirst: boolean };
+  wake: { enabled: boolean };
+  schedule: { enabled: boolean; time: string; onlyIfRan: boolean; tz: string };
+}
+
+export type NotifyEvent = 'crash' | 'startFailed' | 'backupFailed' | 'diskPressure' | 'ramPressure' | 'smart' | 'playitOffline' | 'autoStop' | 'wake';
+
+export interface NotifySettings {
+  enabled: boolean;
+  server: string;
+  portalUrl: string;
+  events: Record<NotifyEvent, boolean>;
+  diskPercent: number;
+  cooldownMinutes: number;
+  /** a topic is stored on the server (never sent to the browser) */
+  configured: boolean;
+  hasToken: boolean;
+}
+
 export interface PlayitTunnel {
   publicHost: string | null;
   publicPort: number | null;
@@ -210,7 +235,7 @@ export interface PlayitTunnel {
   copyAddress: string | null;
   localTarget: string | null;
   localPort: number | null;
-  state: 'online' | 'idle' | 'offline' | 'disabled';
+  state: 'online' | 'idle' | 'sleeping' | 'offline' | 'disabled';
 }
 
 export interface PlayitState {

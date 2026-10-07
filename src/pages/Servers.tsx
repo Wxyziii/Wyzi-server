@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Clock, Globe, HardDrive, MemoryStick, Moon, Plus, SearchX, Terminal, Timer } from 'lucide-react';
+import { Archive, Clock, Globe, HardDrive, MemoryStick, Moon, Plus, SearchX, Terminal, Timer } from 'lucide-react';
 import { navigate } from '../lib/router';
 import { footprint, toast, useApp, type Server } from '../lib/store';
 import { IS_LIVE } from '../lib/mode';
@@ -246,11 +246,14 @@ function ServerCard({ s }: { s: Server }) {
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-line bg-bg-1/40 px-5 py-2 text-xs text-fg-3">
         {IS_LIVE ? (
           <>
-            <Chip icon={Moon} on={!!s.enabled}>
-              Start on boot {s.enabled ? 'on' : 'off'}
+            <Chip icon={Moon} on={s.wakeOnConnect}>
+              Wake-on-connect {s.wakeOnConnect ? 'on' : 'off'}
             </Chip>
-            <Chip icon={Timer} on={s.ramAlloc > 0}>
-              Heap {s.ramMin ?? s.ramAlloc}–{s.ramAlloc} GB
+            <Chip icon={Timer} on={s.autoStop}>
+              {s.autoStop ? `Auto-stop after ${s.automation?.autoStop.minutes ?? 15} min idle` : 'Auto-stop off'}
+            </Chip>
+            <Chip icon={Archive} on={!!s.automation?.schedule.enabled}>
+              {s.automation?.schedule.enabled ? `Backup daily ${s.automation.schedule.time}` : 'No backup schedule'}
             </Chip>
           </>
         ) : (
