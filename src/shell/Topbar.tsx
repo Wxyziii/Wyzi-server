@@ -10,6 +10,7 @@ import { Tooltip } from '../ui/Tooltip';
 const titles: Record<string, string> = {
   dashboard: 'Dashboard',
   servers: 'Servers',
+  config: 'Config',
   storage: 'Storage',
   backups: 'Backups',
   network: 'Network',

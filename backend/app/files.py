@@ -68,6 +68,7 @@ def list_dir(root: Path, rel: str) -> dict:
                     "size": None if is_dir else _size(st.st_size),
                     "bytes": None if is_dir else st.st_size,
                     "modified": _modified(st.st_mtime),
+                    "mtime": int(st.st_mtime),
                     "previewable": (not is_dir) and Path(e.name).suffix.lower() in TEXT_EXT and st.st_size <= MAX_PREVIEW,
                 })
     except PermissionError:

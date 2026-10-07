@@ -9,6 +9,7 @@ import {
   Search,
   Server as ServerIcon,
   Settings,
+  SlidersHorizontal,
   type LucideIcon,
 } from 'lucide-react';
 import { navigate, type Route } from '../lib/router';
@@ -23,6 +24,7 @@ import { Kbd } from '../ui/Controls';
 const nav: { id: Route['page']; label: string; icon: LucideIcon; group?: string }[] = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutGrid },
   { id: 'servers', label: 'Servers', icon: ServerIcon },
+  { id: 'config', label: 'Config', icon: SlidersHorizontal },
   { id: 'storage', label: 'Storage', icon: HardDrive, group: 'Infrastructure' },
   { id: 'backups', label: 'Backups', icon: Archive },
   { id: 'network', label: 'Network', icon: Network },

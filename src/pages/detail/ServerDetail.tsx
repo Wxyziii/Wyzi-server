@@ -56,7 +56,7 @@ export function ServerDetail({ id, tab }: { id: string; tab: string }) {
     { value: 'files', label: 'Files', icon: FolderTree },
     { value: 'performance', label: 'Performance', icon: BarChart3 },
     { value: 'backups', label: 'Backups', icon: Archive, count: backups.filter((b) => b.serverId === s.id).length },
-    ...(s.modConfig ? [{ value: 'gameplay', label: 'Gameplay', icon: Wand2 }] : []),
+    ...(s.modConfig ? [{ value: 'gameplay', label: 'Config', icon: Wand2 }] : []),
     { value: 'settings', label: 'Settings', icon: Settings2 },
   ];
 

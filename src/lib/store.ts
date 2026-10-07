@@ -230,11 +230,18 @@ export function dismissToast(id: number) {
   S((st) => ({ toasts: st.toasts.filter((t) => t.id !== id) }));
 }
 
-export const isActive = (s: Server) => s.status === 'running' || s.status === 'starting' || s.status === 'stopping';
-export const isDeployed = (s: Server) => s.deployed !== false && s.status !== 'undeployed';
+// function declarations (hoisted): the mock store calls these while this module is still initialising
+export function isActive(s: Server) {
+  return s.status === 'running' || s.status === 'starting' || s.status === 'stopping';
+}
+export function isDeployed(s: Server) {
+  return s.deployed !== false && s.status !== 'undeployed';
+}
 
 /** JVM footprint the RAM safety model reserves for a server (Xmx + native overhead). */
-export const footprint = (s: Pick<Server, 'ramAlloc' | 'footprint'>) => s.footprint ?? +(s.ramAlloc + Math.max(0.5, 0.2 * s.ramAlloc)).toFixed(2);
+export function footprint(s: Pick<Server, 'ramAlloc' | 'footprint'>) {
+  return s.footprint ?? +(s.ramAlloc + Math.max(0.5, 0.2 * s.ramAlloc)).toFixed(2);
+}
 
 /** Memory composition for charts: everything comes from MemAvailable-based host data. */
 export function memoryBreakdown(m: MemoryInfo) {

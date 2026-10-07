@@ -435,7 +435,7 @@ export function FilesTab({ s }: { s: Server }) {
   return <MockFilesTab s={s} />;
 }
 
-type LiveEntry = { name: string; dir: boolean; size: string | null; modified: string; previewable: boolean };
+type LiveEntry = { name: string; dir: boolean; size: string | null; modified: string; mtime?: number; previewable: boolean };
 
 /** Read-only browser backed by /api/instances/<id>/files (confined to the instance dir, secrets redacted). */
 function LiveFilesTab({ s }: { s: Server }) {
@@ -518,7 +518,7 @@ function LiveFilesTab({ s }: { s: Server }) {
             return (
               <FileRow
                 key={n.name}
-                n={{ name: n.name, dir: n.dir, size: n.size ?? undefined, modified: n.modified }}
+                n={{ name: n.name, dir: n.dir, size: n.size ?? undefined, modified: n.mtime ? localStamp(n.mtime) : n.modified }}
                 active={open === full}
                 readOnly
                 onOpen={() => (n.dir ? setPath([...path, n.name]) : setOpen(full))}
@@ -1003,4 +1003,14 @@ export function Row({ label, desc, children }: { label: string; desc?: string; c
       <div className="shrink-0">{children}</div>
     </div>
   );
+}
+
+/** File times in the viewer's timezone (the server reports UTC). */
+function localStamp(sec: number) {
+  const d = new Date(sec * 1000);
+  const now = new Date();
+  const hm = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+  if (d.toDateString() === now.toDateString()) return `Today, ${hm}`;
+  const md = d.toLocaleDateString('en-US', { month: 'short', day: '2-digit' });
+  return d.getFullYear() === now.getFullYear() ? `${md}, ${hm}` : `${md} ${d.getFullYear()}`;
 }

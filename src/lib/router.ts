@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 
-export type Page = 'dashboard' | 'servers' | 'storage' | 'backups' | 'network' | 'system' | 'logs' | 'settings';
+export type Page = 'dashboard' | 'servers' | 'config' | 'storage' | 'backups' | 'network' | 'system' | 'logs' | 'settings';
 
 export interface Route {
   page: Page;

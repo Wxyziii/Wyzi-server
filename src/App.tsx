@@ -21,6 +21,7 @@ import { NetworkPage } from './pages/Network';
 import { SystemPage } from './pages/System';
 import { Logs } from './pages/Logs';
 import { SettingsPage } from './pages/Settings';
+import { ConfigPage } from './pages/Config';
 
 export default function App() {
   const route = useRoute();
@@ -61,6 +62,7 @@ export default function App() {
     page = {
       dashboard: <Dashboard />,
       servers: <Servers />,
+      config: <ConfigPage />,
       storage: <Storage />,
       backups: <Backups />,
       network: <NetworkPage />,
