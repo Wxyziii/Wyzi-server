@@ -37,7 +37,22 @@ allowed host. Requests with an unknown `Host` header are rejected with `421` (DN
 | `POST /api/instances/{id}/backups` | `202`; manual backup via `wyzi-helper backup` |
 | `POST /api/instances/{id}/backups/{archive}/restore` body `{confirm: "<id>"}` | `202`; instance must be stopped; confirmation must equal the id |
 | `POST /api/playit/restart` | restarts the agent via `wyzi-helper playit restart` |
-| `PUT /api/settings` body `{safetyHeadroom}` | validated (0.5–6 GB) |
+| `PUT /api/settings` body `{safetyHeadroom}` or `{notify: {...}}` | validated (headroom 0.5–6 GB; notify keys allow-listed) |
+| `PUT /api/instances/{id}/automation` | `{autoStop:{enabled,minutes,backupFirst}, wake:{enabled}, schedule:{enabled,time,onlyIfRan,tz}}` (partial updates) |
+| `PUT /api/notify/secrets` body `{topic?, token?, clearToken?}` | write-only; topic `[A-Za-z0-9_-]{8,64}`, token `tk_…` |
+| `POST /api/notify/test` | sends a test push (works while disabled) |
+
+## Auth
+
+| Endpoint | Notes |
+|---|---|
+| `GET /api/auth/state` | `{configured, authenticated}` (public) |
+| `POST /api/auth/login` body `{password}` | sets the session cookie; `401` wrong, `429` locked, `409` no password set |
+| `POST /api/auth/logout` | ends this session |
+| `POST /api/auth/logout-all` | ends all sessions |
+| `POST /api/auth/password` body `{current, new}` | min 10 chars; signs out all sessions |
+
+Any other `/api/*` request without a valid session → `401 {code: "login_required" | "setup_required"}`.
 
 ## WebSocket `/api/ws`
 
@@ -57,7 +72,7 @@ Client → server: `{"type": "console", "ids": ["fabric"]}` (subscribe; sends a 
 
 ## Instance status values
 
-`offline` · `starting` · `running` · `stopping` · `failed` · `undeployed`
+`offline` · `sleeping` (offline, wake listener active) · `starting` · `running` · `stopping` · `failed` · `undeployed`
 
 `starting` covers: request accepted → systemd activating → Java running → Minecraft loading →
 `Done` seen; it becomes `running` only when RCON answers (or `Done` is seen when RCON is disabled).

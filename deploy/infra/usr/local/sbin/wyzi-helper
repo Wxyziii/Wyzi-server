@@ -46,11 +46,14 @@ case "$action" in
     need_instance "${1:-}"
     journalctl -u "wyzi-mc@$1.service" -n "$(lines_arg "${2:-200}")" --no-pager -o short-iso ;;
   backup)
+    # backup <instance> [manual|scheduled|pre-stop]  (label selects the retention class)
     need_instance "${1:-}"
-    systemd-run --quiet --collect --unit="wyzi-backup-manual-$1-$(date -u +%Y%m%dT%H%M%S)" \
+    label=${2:-manual}
+    case "$label" in manual|scheduled|pre-stop) ;; *) die "label must be manual, scheduled or pre-stop" ;; esac
+    systemd-run --quiet --collect --unit="wyzi-backup-$label-$1-$(date -u +%Y%m%dT%H%M%S)" \
       --uid=minecraft --gid=minecraft -p Nice=10 -p IOSchedulingClass=best-effort -p IOSchedulingPriority=7 \
-      /opt/wyzi-server/bin/wyzi-backup "$1" manual
-    echo "backup started" ;;
+      /opt/wyzi-server/bin/wyzi-backup "$1" "$label"
+    echo "backup started ($label)" ;;
   backups)
     need_instance "${1:-}"
     ls -1 --time-style=+%Y-%m-%dT%H:%M:%S -l "/srv/storage/backups/minecraft/$1" 2>/dev/null \

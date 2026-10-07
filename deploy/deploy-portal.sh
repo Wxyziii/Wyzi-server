@@ -39,11 +39,19 @@ cp "$NEW/backend/requirements.txt" "$P/backend/requirements.txt"
 cp "$NEW/VERSION" "$P/VERSION"
 chmod -R g+rX,o-w "$P/backend/app" "$P/frontend/dist"
 "$P/backend/.venv/bin/pip" install -q --disable-pip-version-check -r "$P/backend/requirements.txt"
+health() { curl -fsS -H 'Host: localhost' http://127.0.0.1:8080/api/health 2>/dev/null || true; }  # may fail while restarting
 if systemctl is-active --quiet wyzi-portal; then
+  before=$(health | sed -n 's/.*"started":\([0-9.]*\).*/\1/p')
   touch "$P/data/restart-request"
   echo "requested portal restart"
-  for i in $(seq 1 20); do sleep 1; curl -fsS -o /dev/null -H 'Host: localhost' http://127.0.0.1:8080/api/health && break; done
-  curl -fsS -H 'Host: localhost' http://127.0.0.1:8080/api/health && echo
+  # wait for the NEW process (different start time), not the old one still answering
+  for i in $(seq 1 40); do
+    sleep 1
+    now=$(health | sed -n 's/.*"started":\([0-9.]*\).*/\1/p')
+    [ -n "$now" ] && [ "$now" != "$before" ] && break
+  done
+  health && echo
+  [ -n "$now" ] && [ "$now" != "$before" ] || { echo "portal did not come back with the new code" >&2; exit 1; }
 else
   echo "wyzi-portal is not running (first install: run deploy/install-root.sh with sudo)"
 fi

@@ -13,6 +13,8 @@ StartLimitBurst=10
 Type=exec
 User=wyziportal
 Group=wyziportal
+# group-writable files in data/ (admin.hash can be rotated by the portal or by marcel's CLI)
+UMask=0007
 WorkingDirectory=/opt/wyzi-server/portal/backend
 Environment=WYZI_PORTAL_DATA=/opt/wyzi-server/portal/data
 Environment=WYZI_PORTAL_FRONTEND=/opt/wyzi-server/portal/frontend/dist

@@ -68,4 +68,5 @@ Restore needs the server stopped and the instance id typed as confirmation. `wyz
 verifies the checksum, **moves the current directory aside** (`.<id>.pre-restore-<time>`), extracts,
 and carries over excluded paths. Nothing is deleted.
 
-Scheduled backups: `systemctl enable --now wyzi-backup@<id>.timer` (admin). Not enabled yet.
+Scheduled backups, auto-stop and wake-on-connect are configured per instance in the portal —
+see [AUTOMATION.md](AUTOMATION.md). The `wyzi-backup@.timer` units are not used.

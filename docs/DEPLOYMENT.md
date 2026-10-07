@@ -43,6 +43,16 @@ Creates the `wyziplayit` account, installs the two status exporters and `wyzi-po
 enables the timers and the portal, and runs self-checks (health, helper allowed, other sudo
 refused, portal cannot read the Playit socket dir).
 
+## Admin password (first time, and to reset)
+
+```bash
+ssh marceserver
+cd /opt/wyzi-server/portal/backend
+.venv/bin/python -m app.admin set-password      # prompts twice, min 10 characters
+```
+
+Until a password exists the portal shows these instructions instead of a login form.
+
 ## Development backend on the server
 
 ```bash

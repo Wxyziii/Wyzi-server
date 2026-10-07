@@ -4,8 +4,8 @@ Local-only management portal for a home Minecraft server (Ubuntu, systemd, Playi
 React + TypeScript + Vite + Tailwind + Framer Motion + Lucide frontend, FastAPI backend,
 SQLite for settings, WebSockets for live data.
 
-The portal is **LAN-only** (`http://192.168.1.2:8080`). It is never exposed through Playit,
-Cloudflare or port forwarding.
+The portal is **LAN-only** (`http://192.168.1.2:8080`) and protected by a single admin login
+(Argon2id). It is never exposed through Playit, Cloudflare or port forwarding.
 
 ## Two modes
 
@@ -81,3 +81,4 @@ See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 - [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) — server layout, install, deploy, rollback
 - [docs/INSTANCES.md](docs/INSTANCES.md) — Minecraft instance configuration, RAM safety, backups
 - [docs/PLAYIT.md](docs/PLAYIT.md) — the sanitized Playit status bridge
+- [docs/AUTOMATION.md](docs/AUTOMATION.md) — scheduled backups, auto-stop, wake-on-connect, ntfy notifications

@@ -6,6 +6,7 @@
 #   /usr/local/lib/wyzi/wyzi-playit-status   sanitized Playit status (user wyziplayit + playit group, read-only IPC)
 #   /usr/local/lib/wyzi/wyzi-smart-status    sanitized SMART export (root, no serials)
 #   wyzi-playit-status.{service,timer}, wyzi-smart-status.{service,timer}, wyzi-portal.service
+#   /usr/local/sbin/wyzi-helper (from deploy/infra; same allow-list, backup accepts a fixed label)
 # Then enables the two timers and the portal and verifies them.
 set -euo pipefail
 [ "$(id -u)" = 0 ] || { echo "run with sudo" >&2; exit 1; }
@@ -25,6 +26,13 @@ for f in wyzi-playit-status wyzi-smart-status; do
   install -m 0755 -o root -g root "$SRC/usr/local/lib/wyzi/$f" "/usr/local/lib/wyzi/$f"
   sed -i 's/\r$//' "/usr/local/lib/wyzi/$f"
 done
+
+echo "==> privileged helper (allow-list unchanged except: backup <id> [manual|scheduled|pre-stop])"
+HELPER_SRC=$(cd "$(dirname "$0")/infra" && pwd)/usr/local/sbin/wyzi-helper
+sed 's/\r$//' "$HELPER_SRC" > /tmp/wyzi-helper.new
+bash -n /tmp/wyzi-helper.new
+install -m 0755 -o root -g root /tmp/wyzi-helper.new /usr/local/sbin/wyzi-helper
+rm -f /tmp/wyzi-helper.new
 
 echo "==> units"
 for u in wyzi-playit-status.service wyzi-playit-status.timer wyzi-smart-status.service wyzi-smart-status.timer wyzi-portal.service; do
@@ -52,5 +60,6 @@ echo -n "portal health: "; curl -fsS -H 'Host: 192.168.1.2' http://127.0.0.1:808
 echo -n "portal can read sanitized playit status: "; runuser -u wyziportal -- test -r /run/wyzi-playit/status.json && echo yes || echo NO-PROBLEM
 echo -n "portal can read playit socket dir (must be 'no'): "; runuser -u wyziportal -- test -r /run/playit && echo YES-PROBLEM || echo no
 echo -n "portal helper allowed: "; runuser -u wyziportal -- sudo -n /usr/local/sbin/wyzi-helper list | head -1
+echo -n "helper rejects unknown backup label (must be 'rejected'): "; runuser -u wyziportal -- sudo -n /usr/local/sbin/wyzi-helper backup fabric evil >/dev/null 2>&1 && echo ACCEPTED-PROBLEM || echo rejected
 echo -n "portal arbitrary sudo (must fail): "; runuser -u wyziportal -- sudo -n /usr/bin/id >/dev/null 2>&1 && echo YES-PROBLEM || echo refused
 echo "done."
