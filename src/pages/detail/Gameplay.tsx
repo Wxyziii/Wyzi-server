@@ -114,8 +114,82 @@ type Definition = {
   reward: string;
   repeat: string;
   category: string;
+  /** extra rewards besides CobbleDollars */
+  items?: Record<string, number> | null;
+  xp?: number;
 };
-type ObjectiveFile = { enabled: boolean; dailyCount: number; dailyBonus: string; definitions: Definition[] };
+type Reward = { money: string; items?: Record<string, number> | null; xp: number };
+type AdvancementRewards = { enabled: boolean; includeModded: boolean; frames: Record<string, Reward>; overrides?: Record<string, Reward> | null; exclude?: string[] | null };
+type ObjectiveFile = { enabled: boolean; dailyCount: number; dailyBonus: string; definitions: Definition[]; advancements?: AdvancementRewards | null };
+
+const ITEM_ID = /^[a-z0-9_.-]+:[a-z0-9_/.-]+$/;
+const shortItem = (id: string) => id.split(':')[1]?.replace(/_/g, ' ') ?? id;
+
+/** Item + XP part of a reward (money is edited next to it). */
+function ExtraRewards({ items, xp, onChange }: { items: Record<string, number> | null | undefined; xp: number | undefined; onChange: (items: Record<string, number>, xp: number) => void }) {
+  const [id, setId] = useState('');
+  const list = Object.entries(items ?? {});
+  const cur = items ?? {};
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex flex-wrap items-center gap-2">
+        {list.map(([k, n]) => (
+          <span key={k} className="flex items-center gap-1.5 rounded-md border border-line bg-bg-1 py-0.5 pr-1 pl-2 text-xs">
+            <span className="font-mono text-fg-2">{k}</span>
+            <input
+              type="number"
+              min={1}
+              max={576}
+              value={n}
+              onChange={(e) => onChange({ ...cur, [k]: Math.max(1, Math.min(576, parseInt(e.target.value || '1', 10))) }, xp ?? 0)}
+              className="num w-14 rounded bg-transparent px-1 text-right outline-none"
+            />
+            <IconButton
+              icon={Trash2}
+              label="Remove"
+              size="xs"
+              onClick={() => {
+                const next = { ...cur };
+                delete next[k];
+                onChange(next, xp ?? 0);
+              }}
+            />
+          </span>
+        ))}
+        {list.length === 0 && <span className="text-xs text-fg-4">No items</span>}
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <TextInput icon={null} mono value={id} placeholder="cobblemon:rare_candy" onChange={(e) => setId(e.target.value.trim().toLowerCase())} className="w-[220px]" />
+        <Button
+          size="xs"
+          variant="secondary"
+          icon={Plus}
+          disabled={!ITEM_ID.test(id) || id in cur || list.length >= 9}
+          onClick={() => {
+            onChange({ ...cur, [id]: 1 }, xp ?? 0);
+            setId('');
+          }}
+        >
+          Add item
+        </Button>
+        <span className="ml-2 text-xs text-fg-3">XP levels</span>
+        <input
+          type="number"
+          min={0}
+          max={1000}
+          value={xp ?? 0}
+          onChange={(e) => onChange(cur, Math.max(0, Math.min(1000, parseInt(e.target.value || '0', 10))))}
+          className="num h-7 w-16 rounded-md border border-line bg-bg-1 px-2 text-right text-sm outline-none"
+        />
+      </div>
+    </div>
+  );
+}
+const extrasText = (items?: Record<string, number> | null, xp?: number) => {
+  const parts = Object.entries(items ?? {}).map(([k, n]) => `${n}× ${shortItem(k)}`);
+  if (xp) parts.push(`${xp} lv`);
+  return parts.join(', ');
+};
 
 const TYPES: { value: string; label: string; needs?: string }[] = [
   { value: 'defeat_pokemon', label: 'Defeat Pokémon' },
@@ -180,7 +254,10 @@ function DefinitionRow({ d, achievement, onChange, onDelete, onDuplicate, open, 
         </button>
         <span className="truncate text-xs text-fg-2">{typeLabel(d.type)}{filterKey ? <span className="text-fg-4"> · {d.filters[filterKey]}</span> : null}</span>
         <span className="num text-right text-sm">{d.target.toLocaleString()}</span>
-        <span className="num text-right text-sm text-amber">{money(d.reward)} ₽</span>
+        <span className="min-w-0 text-right">
+          <span className="num block text-sm text-amber">{money(d.reward)} ₽</span>
+          {extrasText(d.items, d.xp) && <span className="block truncate text-2xs text-fg-3">+ {extrasText(d.items, d.xp)}</span>}
+        </span>
         <Badge tone={d.repeat === 'daily' ? 'blue' : d.repeat === 'weekly' ? 'violet' : 'neutral'}>{achievement ? d.category : d.repeat}</Badge>
         <div className="flex justify-end gap-0.5">
           <Tooltip content="Duplicate"><IconButton icon={Copy} label="Duplicate" size="xs" onClick={onDuplicate} /></Tooltip>
@@ -230,6 +307,9 @@ function DefinitionRow({ d, achievement, onChange, onDelete, onDuplicate, open, 
               <Field label="Reward (₽)">
                 <TextInput icon={Coins} value={d.reward} onChange={(e) => set('reward', digits(e.target.value) || '0')} className="w-[180px]" />
               </Field>
+              <Field label="Extra rewards" hint="Items go to the inventory (the player needs free slots); XP is added as levels" wide>
+                <ExtraRewards items={d.items} xp={d.xp} onChange={(items, xp) => onChange({ ...d, items, xp })} />
+              </Field>
               {!achievement && (
                 <Field label="Repeats">
                   <Segmented size="xs" value={d.repeat} onChange={(v) => set('repeat', v)} options={[{ value: 'daily', label: 'Daily' }, { value: 'weekly', label: 'Weekly' }, { value: 'progression', label: 'Once (progression)' }]} />
@@ -253,6 +333,67 @@ function Field({ label, hint, wide, children }: { label: string; hint?: string; 
       {children}
       {hint && <span className="text-2xs text-fg-4">{hint}</span>}
     </label>
+  );
+}
+
+const FRAME_LABEL: Record<string, string> = { task: 'Normal advancement', goal: 'Goal', challenge: 'Challenge' };
+const ADV_DEFAULT: AdvancementRewards = {
+  enabled: true,
+  includeModded: true,
+  frames: {
+    task: { money: '1000', items: {}, xp: 0 },
+    goal: { money: '5000', items: { 'cobblemon:exp_candy_m': 2 }, xp: 0 },
+    challenge: { money: '20000', items: { 'cobblemon:rare_candy': 3 }, xp: 5 },
+  },
+  overrides: {},
+  exclude: ['minecraft:story/enter_the_nether', 'minecraft:story/enter_the_end', 'minecraft:end/kill_dragon'],
+};
+
+function AdvancementPanel({ value, onChange }: { value: AdvancementRewards | null; onChange: (v: AdvancementRewards) => void }) {
+  const a = value ?? ADV_DEFAULT;
+  const set = (patch: Partial<AdvancementRewards>) => onChange({ ...a, ...patch });
+  const overrides = Object.keys(a.overrides ?? {}).length;
+  return (
+    <div className="mt-5">
+      <SettingsGroup title="Every advancement" desc="Each Minecraft and modded advancement is an achievement; players can claim ones they earned before.">
+        <Row label="Reward every advancement">
+          <Switch checked={a.enabled} onChange={(v) => set({ enabled: v })} />
+        </Row>
+        <Row label="Include modded advancements" desc="Cobblemon, Cobbleverse, mega, raids and more">
+          <Switch checked={a.includeModded} onChange={(v) => set({ includeModded: v })} />
+        </Row>
+        {['task', 'goal', 'challenge'].map((frame) => {
+          const r = a.frames[frame] ?? { money: '0', items: {}, xp: 0 };
+          const setFrame = (next: Reward) => set({ frames: { ...a.frames, [frame]: next } });
+          return (
+            <div key={frame} className="flex flex-col gap-2 px-5 py-3">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <div className="text-sm">{FRAME_LABEL[frame]}</div>
+                  <div className="text-xs text-fg-3">{frame === 'task' ? 'Most advancements' : frame === 'goal' ? 'Rounded frame in the advancement screen' : 'Spiky frame: the hard ones'}</div>
+                </div>
+                <TextInput icon={Coins} value={r.money} onChange={(e) => setFrame({ ...r, money: digits(e.target.value) || '0' })} className="w-[160px]" />
+              </div>
+              <ExtraRewards items={r.items} xp={r.xp} onChange={(items, xp) => setFrame({ ...r, items, xp })} />
+            </div>
+          );
+        })}
+        <div className="flex flex-col gap-1.5 px-5 py-3">
+          <div className="text-sm">Excluded advancements</div>
+          <div className="text-xs text-fg-3">One advancement id per line. Use it for feats that already have their own achievement above.</div>
+          <textarea
+            value={(a.exclude ?? []).join('\n')}
+            spellCheck={false}
+            onChange={(e) => set({ exclude: e.target.value.split('\n').map((l) => l.trim()).filter(Boolean).slice(0, 1024) })}
+            className="mt-1 h-24 w-full resize-y rounded-md border border-line bg-bg-1 p-2 font-mono text-[12px] text-fg-2 outline-none"
+          />
+        </div>
+        <div className="px-5 py-2.5 text-xs text-fg-4">
+          {overrides} per-advancement override{overrides === 1 ? '' : 's'} · set a custom reward for one advancement under Advanced → achievements.json → advancements.overrides.
+          {!value && ' These are the defaults; saving writes them into the file.'}
+        </div>
+      </SettingsGroup>
+    </div>
   );
 }
 
@@ -351,8 +492,9 @@ function ObjectivesEditor({ server, achievement }: { server: Server; achievement
           />
         ))}
       </Panel>
+      {achievement && <AdvancementPanel value={data.advancements ?? null} onChange={(a) => f.setData({ ...data, advancements: a })} />}
       <p className="mt-3 px-1 text-xs text-fg-4">
-        Rewards are paid in CobbleDollars when a player presses Claim. Changing an objective's type, filter or target restarts unclaimed progress for that entry; claimed rewards are never paid twice.
+        Rewards are paid when a player presses Claim (or Claim all). Changing an objective's type, filter or target restarts unclaimed progress for that entry; claimed rewards are never paid twice.
       </p>
       <SaveBar dirty={f.dirty} saving={f.saving} onSave={() => void f.save()} onReset={f.reset} label={achievement ? 'achievements' : 'quests'} />
     </div>
