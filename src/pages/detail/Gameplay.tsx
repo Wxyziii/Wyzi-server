@@ -525,6 +525,7 @@ const SERVICES: { key: string; label: string; desc: string }[] = [
   { key: 'ability', label: 'Ability change', desc: '' },
   { key: 'friendship', label: 'Max friendship', desc: '' },
   { key: 'repair', label: 'Tool repair', desc: 'Per damaged item, full durability' },
+  { key: 'unbreakable_book', label: 'Unbreaking ∞ book', desc: 'Enchanted book: the item never breaks' },
 ];
 const RARITIES = ['common', 'uncommon', 'rare', 'ultra-rare', 'legendary'];
 
