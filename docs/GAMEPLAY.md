@@ -10,6 +10,7 @@ It appears when `<instance>/config/wyzi-poke-portal/` exists.
 | Prices | `portal.json` | Pokémon service prices (shiny, IV, EV, nature, ability, friendship) |
 | | `spawn_boosts.json` | spawn / shiny / form boost offers, durations, prices, legendary cap |
 | | `legendary_shop.json` | summoning items, price, region needed to unlock |
+| Harvest boosts | `harvest_boosts.json` | timed drop multipliers for ores/crops (stack up to a limit, on top of Fortune; Silk Touch never boosted), max at once, offers |
 | Selling | `selling.json` | Pokémon sale prices (rarity, level, IVs, hidden ability, shiny multiplier, what may be sold) and the item sell list |
 | Starter | `starter.json` | first-starter perks (shiny, IVs, hidden ability) and the one-time starter kit + CobbleDollars |
 | Advanced | any of the above + `gym_tiers.json` | raw JSON editor |

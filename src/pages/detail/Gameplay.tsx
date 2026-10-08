@@ -15,7 +15,7 @@ import { Row, SettingsGroup } from './Tabs';
    Every save is applied live with `/poke reload`; the mod validates each file and keeps the
    previous valid settings when a file is rejected. */
 
-type FileName = 'quests.json' | 'achievements.json' | 'portal.json' | 'starter.json' | 'spawn_boosts.json' | 'legendary_shop.json' | 'selling.json' | 'gym_tiers.json';
+type FileName = 'quests.json' | 'achievements.json' | 'portal.json' | 'starter.json' | 'spawn_boosts.json' | 'legendary_shop.json' | 'selling.json' | 'harvest_boosts.json' | 'gym_tiers.json';
 type SaveResult = { applied: boolean; ok?: boolean; results: Record<string, string>; message: string };
 
 function useModFile<T>(server: Server, name: FileName) {
@@ -708,6 +708,63 @@ type SellFile = {
 };
 const RARITY_LABEL: Record<string, string> = { common: 'Common', uncommon: 'Uncommon', rare: 'Rare', 'ultra-rare': 'Ultra rare', legendary: 'Legendary' };
 
+/* ═════════════════════ HARVEST BOOSTS ═════════════════════ */
+
+type HarvestOffer = { id: string; name: string; multiplier: number; seconds: number; price: string };
+type HarvestFile = { enabled: boolean; maxActive: number; maxMultiplier: number; blocks: string[]; offers: HarvestOffer[] };
+
+function HarvestEditor({ server }: { server: Server }) {
+  const f = useModFile<HarvestFile>(server, 'harvest_boosts.json');
+  if (!f.data) return <LoadState error={f.error} />;
+  const d = f.data;
+  const set = (patch: Partial<HarvestFile>) => f.setData({ ...d, ...patch });
+  const setOffer = (i: number, patch: Partial<HarvestOffer>) => { const list = [...d.offers]; list[i] = { ...list[i], ...patch }; set({ offers: list }); };
+  return (
+    <div className="space-y-5">
+      <ResultNote result={f.result} name="harvest_boosts.json" />
+      <SettingsGroup title="Harvest boosts" desc="Timed drop multipliers players buy under Spawn boosts → Harvest. They stack and work on top of Fortune.">
+        <Row label="Offer harvest boosts">
+          <Switch checked={d.enabled} onChange={(v) => set({ enabled: v })} />
+        </Row>
+        <Row label="Boosts a player can run at once">
+          <Stepper value={d.maxActive} onChange={(v) => set({ maxActive: v })} min={1} max={10} />
+        </Row>
+        <Row label="Highest total multiplier" desc="Stacked boosts add up (×2 + ×3 = ×4) until this limit">
+          <TextInput icon={null} type="number" min={1} max={50} step={0.5} value={d.maxMultiplier} onChange={(e) => set({ maxMultiplier: Math.max(1, Math.min(50, Number(e.target.value) || 1)) })} className="w-[110px]" />
+        </Row>
+        <div className="grid grid-cols-[1fr_1fr_100px_100px_150px_32px] gap-3 px-5 py-1.5 text-2xs text-fg-4">
+          <span>Name</span><span>Id</span><span>Multiplier</span><span>Minutes</span><span>Price ₽</span><span />
+        </div>
+        {d.offers.map((o, i) => (
+          <div key={i} className="grid grid-cols-[1fr_1fr_100px_100px_150px_32px] items-center gap-3 px-5 py-2">
+            <TextInput icon={null} value={o.name} onChange={(e) => setOffer(i, { name: e.target.value.slice(0, 32) })} />
+            <span className="truncate font-mono text-[12px] text-fg-3">{o.id}</span>
+            <TextInput icon={null} type="number" step={0.5} min={1.1} max={20} value={o.multiplier} onChange={(e) => setOffer(i, { multiplier: Math.max(1.1, Math.min(20, Number(e.target.value) || 1.1)) })} />
+            <TextInput icon={null} type="number" min={1} max={1440} value={Math.round(o.seconds / 60)} onChange={(e) => setOffer(i, { seconds: Math.max(1, Math.min(1440, parseInt(e.target.value || '1', 10))) * 60 })} />
+            <TextInput icon={Coins} value={o.price} onChange={(e) => setOffer(i, { price: digits(e.target.value) || '0' })} />
+            <IconButton icon={Trash2} label="Remove" size="xs" onClick={() => set({ offers: d.offers.filter((_, j) => j !== i) })} />
+          </div>
+        ))}
+        <div className="px-5 py-2.5">
+          <Button size="xs" variant="ghost" icon={Plus} disabled={d.offers.length >= 6}
+            onClick={() => { let n = d.offers.length + 1; while (d.offers.some((x) => x.id === `harvest-${n}`)) n++; set({ offers: [...d.offers, { id: `harvest-${n}`, name: 'New boost', multiplier: 2, seconds: 1800, price: '20000' }] }); }}>
+            Add offer
+          </Button>
+          <span className="ml-3 text-2xs text-fg-4">The game shows up to 6 offers</span>
+        </div>
+        <div className="flex flex-col gap-1.5 px-5 py-3">
+          <div className="text-sm">Boosted blocks</div>
+          <div className="text-xs text-fg-3">One block id or #tag per line. #c:ores covers every vanilla and Cobblemon ore. Drops that are the block itself (Silk Touch) are never multiplied.</div>
+          <textarea value={d.blocks.join('\n')} spellCheck={false}
+            onChange={(e) => set({ blocks: e.target.value.split('\n').map((l) => l.trim()).filter(Boolean).slice(0, 256) })}
+            className="mt-1 h-24 w-full resize-y rounded-md border border-line bg-bg-1 p-2 font-mono text-[12px] text-fg-2 outline-none" />
+        </div>
+      </SettingsGroup>
+      <SaveBar dirty={f.dirty} saving={f.saving} onSave={() => void f.save()} onReset={f.reset} label="harvest boosts" />
+    </div>
+  );
+}
+
 function SellingEditor({ server }: { server: Server }) {
   const f = useModFile<SellFile>(server, 'selling.json');
   const [newItem, setNewItem] = useState('');
@@ -928,7 +985,7 @@ function AdvancedEditor({ server }: { server: Server }) {
             <Select
               value={name}
               onChange={(v) => setName(v as FileName)}
-              options={['gym_tiers.json', 'quests.json', 'achievements.json', 'portal.json', 'starter.json', 'spawn_boosts.json', 'legendary_shop.json', 'selling.json']}
+              options={['gym_tiers.json', 'quests.json', 'achievements.json', 'portal.json', 'starter.json', 'spawn_boosts.json', 'legendary_shop.json', 'selling.json', 'harvest_boosts.json']}
               width={190}
             />
             <Button size="xs" variant="ghost" icon={RotateCcw} onClick={() => f.data !== null && setText(JSON.stringify(f.data, null, 2))}>
@@ -997,6 +1054,7 @@ export function GameplayTab({ s }: { s: Server }) {
             { value: 'achievements', label: 'Achievements' },
             { value: 'prices', label: 'Prices' },
             { value: 'selling', label: 'Selling' },
+            { value: 'harvest', label: 'Harvest boosts' },
             { value: 'starter', label: 'Starter' },
             { value: 'advanced', label: 'Advanced' },
           ]}
@@ -1041,6 +1099,7 @@ export function GameplayTab({ s }: { s: Server }) {
       {section === 'achievements' && <ObjectivesEditor server={s} achievement />}
       {section === 'prices' && <PricesEditor server={s} />}
       {section === 'selling' && <SellingEditor server={s} />}
+      {section === 'harvest' && <HarvestEditor server={s} />}
       {section === 'starter' && <StarterEditor server={s} />}
       {section === 'advanced' && <AdvancedEditor server={s} />}
     </div>
