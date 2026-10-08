@@ -15,7 +15,7 @@ import { Row, SettingsGroup } from './Tabs';
    Every save is applied live with `/poke reload`; the mod validates each file and keeps the
    previous valid settings when a file is rejected. */
 
-type FileName = 'quests.json' | 'achievements.json' | 'portal.json' | 'starter.json' | 'spawn_boosts.json' | 'legendary_shop.json' | 'selling.json' | 'harvest_boosts.json' | 'veinmining.json' | 'gym_tiers.json';
+type FileName = 'quests.json' | 'achievements.json' | 'portal.json' | 'starter.json' | 'spawn_boosts.json' | 'legendary_shop.json' | 'selling.json' | 'harvest_boosts.json' | 'veinmining.json' | 'spawn_rates.json' | 'gym_tiers.json';
 type SaveResult = { applied: boolean; ok?: boolean; results: Record<string, string>; message: string };
 
 function useModFile<T>(server: Server, name: FileName) {
@@ -718,6 +718,65 @@ type SellFile = {
 };
 const RARITY_LABEL: Record<string, string> = { common: 'Common', uncommon: 'Uncommon', rare: 'Rare', 'ultra-rare': 'Ultra rare', legendary: 'Legendary' };
 
+/* ═════════════════════ SPAWNING ═════════════════════ */
+
+type SpawnRatesFile = {
+  enabled: boolean;
+  buckets: Record<string, number>;
+  pokemonPerChunk: number;
+  maximumSpawnsPerPass: number;
+  ticksBetweenSpawnAttempts: number;
+  minimumDistanceBetweenEntities: number;
+  boostsRaiseRarity: boolean;
+};
+const BUCKET_ORDER = ['common', 'uncommon', 'rare', 'ultra-rare'];
+
+function SpawningEditor({ server }: { server: Server }) {
+  const f = useModFile<SpawnRatesFile>(server, 'spawn_rates.json');
+  if (!f.data) return <LoadState error={f.error} />;
+  const d = f.data;
+  const set = (patch: Partial<SpawnRatesFile>) => f.setData({ ...d, ...patch });
+  const names = [...BUCKET_ORDER.filter((b) => b in d.buckets), ...Object.keys(d.buckets).filter((b) => !BUCKET_ORDER.includes(b))];
+  const total = names.reduce((sum, b) => sum + (d.buckets[b] || 0), 0);
+  const num = (v: string, min: number, max: number, int = false) => {
+    const n = int ? parseInt(v || '0', 10) : parseFloat(v || '0');
+    return Math.max(min, Math.min(max, Number.isFinite(n) ? n : min));
+  };
+  return (
+    <div className="space-y-5">
+      <ResultNote result={f.result} name="spawn_rates.json" />
+      <SettingsGroup title="Wild spawning" desc="Applied live to Cobblemon when you save. Off restores Cobblemon's own values.">
+        <Row label="Custom spawn rates on">
+          <Switch checked={d.enabled} onChange={(v) => set({ enabled: v })} />
+        </Row>
+        <Row label="Pokémon per chunk" desc="How crowded it gets around each player (Cobblemon default 1)">
+          <TextInput icon={null} type="number" step={0.25} min={0.1} max={5} value={d.pokemonPerChunk} onChange={(e) => set({ pokemonPerChunk: num(e.target.value, 0.1, 5) })} className="w-[110px]" />
+        </Row>
+        <Row label="Spawns per attempt" desc="Pokémon placed per spawn attempt (default 1)">
+          <Stepper value={d.maximumSpawnsPerPass} onChange={(v) => set({ maximumSpawnsPerPass: v })} min={1} max={5} />
+        </Row>
+        <Row label="Ticks between attempts" desc="Lower = faster spawning (default 10). Applies when a player rejoins.">
+          <TextInput icon={null} type="number" min={1} max={200} value={d.ticksBetweenSpawnAttempts} onChange={(e) => set({ ticksBetweenSpawnAttempts: num(e.target.value, 1, 200) })} className="w-[110px]" />
+        </Row>
+        <Row label="Min. distance between Pokémon" desc="Blocks (default 8)">
+          <TextInput icon={null} type="number" min={1} max={32} value={d.minimumDistanceBetweenEntities} onChange={(e) => set({ minimumDistanceBetweenEntities: num(e.target.value, 1, 32) })} className="w-[110px]" />
+        </Row>
+      </SettingsGroup>
+      <SettingsGroup title="Rarity roll" desc="Cobblemon first rolls a rarity, then a Pokémon of that rarity. Raise rare and ultra rare to see those Pokémon more often.">
+        {names.map((b) => (
+          <Row key={b} label={RARITY_LABEL[b] ?? b} desc={total > 0 ? `${(((d.buckets[b] || 0) / total) * 100).toFixed(1)}% of rolls` : undefined}>
+            <TextInput icon={null} type="number" min={0} max={1000} step={0.1} value={d.buckets[b]} onChange={(e) => set({ buckets: { ...d.buckets, [b]: num(e.target.value, 0, 1000) } })} className="w-[110px]" />
+          </Row>
+        ))}
+        <Row label="Boosts also raise the rarity" desc="A bought ×8 boost makes the Pokémon's rarity roll ×8 for the buyer too, not only its share inside that rarity">
+          <Switch checked={d.boostsRaiseRarity} onChange={(v) => set({ boostsRaiseRarity: v })} />
+        </Row>
+      </SettingsGroup>
+      <SaveBar dirty={f.dirty} saving={f.saving} onSave={() => void f.save()} onReset={f.reset} label="spawning" />
+    </div>
+  );
+}
+
 /* ═════════════════════ VEIN MINING ═════════════════════ */
 
 type VeinGroup = { name: string; blocks: string[] };
@@ -1058,7 +1117,7 @@ function AdvancedEditor({ server }: { server: Server }) {
             <Select
               value={name}
               onChange={(v) => setName(v as FileName)}
-              options={['gym_tiers.json', 'quests.json', 'achievements.json', 'portal.json', 'starter.json', 'spawn_boosts.json', 'legendary_shop.json', 'selling.json', 'harvest_boosts.json', 'veinmining.json']}
+              options={['gym_tiers.json', 'quests.json', 'achievements.json', 'portal.json', 'starter.json', 'spawn_boosts.json', 'legendary_shop.json', 'selling.json', 'spawn_rates.json', 'harvest_boosts.json', 'veinmining.json']}
               width={190}
             />
             <Button size="xs" variant="ghost" icon={RotateCcw} onClick={() => f.data !== null && setText(JSON.stringify(f.data, null, 2))}>
@@ -1127,6 +1186,7 @@ export function GameplayTab({ s }: { s: Server }) {
             { value: 'achievements', label: 'Achievements' },
             { value: 'prices', label: 'Prices' },
             { value: 'selling', label: 'Selling' },
+            { value: 'spawning', label: 'Spawning' },
             { value: 'harvest', label: 'Harvest boosts' },
             { value: 'vein', label: 'Vein mining' },
             { value: 'starter', label: 'Starter' },
@@ -1173,6 +1233,7 @@ export function GameplayTab({ s }: { s: Server }) {
       {section === 'achievements' && <ObjectivesEditor server={s} achievement />}
       {section === 'prices' && <PricesEditor server={s} />}
       {section === 'selling' && <SellingEditor server={s} />}
+      {section === 'spawning' && <SpawningEditor server={s} />}
       {section === 'harvest' && <HarvestEditor server={s} />}
       {section === 'vein' && <VeinEditor server={s} />}
       {section === 'starter' && <StarterEditor server={s} />}
