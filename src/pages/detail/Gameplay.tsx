@@ -711,7 +711,7 @@ const RARITY_LABEL: Record<string, string> = { common: 'Common', uncommon: 'Unco
 /* ═════════════════════ HARVEST BOOSTS ═════════════════════ */
 
 type HarvestOffer = { id: string; name: string; multiplier: number; seconds: number; price: string };
-type HarvestFile = { enabled: boolean; maxActive: number; maxMultiplier: number; blocks: string[]; offers: HarvestOffer[] };
+type HarvestFile = { enabled: boolean; maxActive: number; maxMultiplier: number; blocks: string[]; offers: HarvestOffer[]; selfDropBlocks?: string[] | null };
 
 function HarvestEditor({ server }: { server: Server }) {
   const f = useModFile<HarvestFile>(server, 'harvest_boosts.json');
@@ -758,6 +758,13 @@ function HarvestEditor({ server }: { server: Server }) {
           <textarea value={d.blocks.join('\n')} spellCheck={false}
             onChange={(e) => set({ blocks: e.target.value.split('\n').map((l) => l.trim()).filter(Boolean).slice(0, 256) })}
             className="mt-1 h-24 w-full resize-y rounded-md border border-line bg-bg-1 p-2 font-mono text-[12px] text-fg-2 outline-none" />
+        </div>
+        <div className="flex flex-col gap-1.5 px-5 py-3">
+          <div className="text-sm">Boost only when naturally generated</div>
+          <div className="text-xs text-fg-3">Blocks that drop themselves (like ancient debris). They are boosted when the world generated them; blocks a player placed (or pushed with a piston) drop normally, so nothing can be duplicated. One block id per line.</div>
+          <textarea value={(d.selfDropBlocks ?? ['minecraft:ancient_debris']).join('\n')} spellCheck={false}
+            onChange={(e) => set({ selfDropBlocks: e.target.value.split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#')).slice(0, 64) })}
+            className="mt-1 h-16 w-full resize-y rounded-md border border-line bg-bg-1 p-2 font-mono text-[12px] text-fg-2 outline-none" />
         </div>
       </SettingsGroup>
       <SaveBar dirty={f.dirty} saving={f.saving} onSave={() => void f.save()} onReset={f.reset} label="harvest boosts" />
