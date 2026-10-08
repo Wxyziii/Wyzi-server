@@ -15,7 +15,7 @@ import { Row, SettingsGroup } from './Tabs';
    Every save is applied live with `/poke reload`; the mod validates each file and keeps the
    previous valid settings when a file is rejected. */
 
-type FileName = 'quests.json' | 'achievements.json' | 'portal.json' | 'starter.json' | 'spawn_boosts.json' | 'legendary_shop.json' | 'selling.json' | 'harvest_boosts.json' | 'gym_tiers.json';
+type FileName = 'quests.json' | 'achievements.json' | 'portal.json' | 'starter.json' | 'spawn_boosts.json' | 'legendary_shop.json' | 'selling.json' | 'harvest_boosts.json' | 'veinmining.json' | 'gym_tiers.json';
 type SaveResult = { applied: boolean; ok?: boolean; results: Record<string, string>; message: string };
 
 function useModFile<T>(server: Server, name: FileName) {
@@ -101,6 +101,20 @@ function LoadState({ error }: { error: string | null }) {
 
 const money = (v: string) => (/^\d+$/.test(v) ? Number(v).toLocaleString() : v);
 const digits = (v: string) => v.replace(/[^0-9]/g, '').slice(0, 12);
+
+/** One entry per line. Keeps the raw text while typing (Enter, blank lines) and reports the cleaned list. */
+function LinesArea({ value, onChange, max, className, rows, keep }: { value: string[]; onChange: (v: string[]) => void; max: number; className?: string; rows?: number; keep?: (line: string) => boolean }) {
+  const [text, setText] = useState(value.join('\n'));
+  const parse = (t: string) => t.split('\n').map((l) => l.trim()).filter((l) => l && (!keep || keep(l))).slice(0, max);
+  // follow outside changes (load, discard) but not our own edits
+  useEffect(() => {
+    if (parse(text).join('\n') !== value.join('\n')) setText(value.join('\n'));
+  }, [value.join('\n')]); // eslint-disable-line react-hooks/exhaustive-deps
+  return (
+    <textarea value={text} rows={rows} spellCheck={false} onChange={(e) => { setText(e.target.value); onChange(parse(e.target.value)); }}
+      className={cx('w-full resize-y rounded-md border border-line bg-bg-1 font-mono text-[12px] text-fg-2 outline-none', className)} />
+  );
+}
 
 /* ═════════════════════ QUESTS & ACHIEVEMENTS ═════════════════════ */
 
@@ -381,12 +395,7 @@ function AdvancementPanel({ value, onChange }: { value: AdvancementRewards | nul
         <div className="flex flex-col gap-1.5 px-5 py-3">
           <div className="text-sm">Excluded advancements</div>
           <div className="text-xs text-fg-3">One advancement id per line. Use it for feats that already have their own achievement above.</div>
-          <textarea
-            value={(a.exclude ?? []).join('\n')}
-            spellCheck={false}
-            onChange={(e) => set({ exclude: e.target.value.split('\n').map((l) => l.trim()).filter(Boolean).slice(0, 1024) })}
-            className="mt-1 h-24 w-full resize-y rounded-md border border-line bg-bg-1 p-2 font-mono text-[12px] text-fg-2 outline-none"
-          />
+          <LinesArea value={a.exclude ?? []} onChange={(v) => set({ exclude: v })} max={1024} className="mt-1 h-24 p-2" />
         </div>
         <div className="px-5 py-2.5 text-xs text-fg-4">
           {overrides} per-advancement override{overrides === 1 ? '' : 's'} · set a custom reward for one advancement under Advanced → achievements.json → advancements.overrides.
@@ -708,6 +717,66 @@ type SellFile = {
 };
 const RARITY_LABEL: Record<string, string> = { common: 'Common', uncommon: 'Uncommon', rare: 'Rare', 'ultra-rare': 'Ultra rare', legendary: 'Legendary' };
 
+/* ═════════════════════ VEIN MINING ═════════════════════ */
+
+type VeinGroup = { name: string; blocks: string[] };
+type VeinFile = { enabled: boolean; maxChain: number; mustSneak: boolean; decreaseDurability: boolean; mergeItemDrops: boolean; delay: number; singleBlocks: string[]; oreGroups: VeinGroup[] };
+
+function VeinEditor({ server }: { server: Server }) {
+  const f = useModFile<VeinFile>(server, 'veinmining.json');
+  if (!f.data) return <LoadState error={f.error} />;
+  const d = f.data;
+  const set = (patch: Partial<VeinFile>) => f.setData({ ...d, ...patch });
+  const setGroup = (i: number, patch: Partial<VeinGroup>) => { const g = [...d.oreGroups]; g[i] = { ...g[i], ...patch }; set({ oreGroups: g }); };
+  return (
+    <div className="space-y-5">
+      <ResultNote result={f.result} name="veinmining.json" />
+      <SettingsGroup title="Vein mining" desc="Sneak while breaking a block to mine the whole connected vein. Saved changes apply to VeinMiner immediately.">
+        <Row label="Vein mining on">
+          <Switch checked={d.enabled} onChange={(v) => set({ enabled: v })} />
+        </Row>
+        <Row label="Max blocks per vein" desc="Protects the server from huge breaks">
+          <TextInput icon={null} type="number" min={1} max={4096} value={d.maxChain} onChange={(e) => set({ maxChain: Math.max(1, Math.min(4096, parseInt(e.target.value || '1', 10))) })} className="w-[110px]" />
+        </Row>
+        <Row label="Only while sneaking">
+          <Switch checked={d.mustSneak} onChange={(v) => set({ mustSneak: v })} />
+        </Row>
+        <Row label="Every block costs durability" desc="Off: a whole vein costs 1 durability">
+          <Switch checked={d.decreaseDurability} onChange={(v) => set({ decreaseDurability: v })} />
+        </Row>
+        <Row label="All drops at the broken block">
+          <Switch checked={d.mergeItemDrops} onChange={(v) => set({ mergeItemDrops: v })} />
+        </Row>
+        <Row label="Ripple delay" desc="Ticks between rings of blocks; 0 breaks everything at once">
+          <Stepper value={d.delay} onChange={(v) => set({ delay: v })} min={0} max={20} />
+        </Row>
+      </SettingsGroup>
+      <SettingsGroup title="Single blocks" desc="Only the exact block you hit is veined (tuff never takes deepslate). One block id per line; #tags work.">
+        <div className="px-5 py-3">
+          <LinesArea value={d.singleBlocks} onChange={(v) => set({ singleBlocks: v })} max={512} className="h-56 p-2" />
+          <div className="mt-1 text-2xs text-fg-4">{d.singleBlocks.length} entries · unknown blocks are rejected and the previous list stays active</div>
+        </div>
+      </SettingsGroup>
+      <SettingsGroup title="Ore groups" desc="Blocks in one group are mined together, e.g. iron ore and deepslate iron ore. Pickaxe only.">
+        {d.oreGroups.map((g, i) => (
+          <div key={i} className="grid grid-cols-[200px_1fr_32px] items-start gap-3 px-5 py-2.5">
+            <TextInput icon={null} value={g.name} onChange={(e) => setGroup(i, { name: e.target.value.slice(0, 48) })} />
+            <LinesArea value={g.blocks} onChange={(v) => setGroup(i, { blocks: v })} max={32} rows={Math.max(2, g.blocks.length + 1)} className="p-1.5" />
+            <IconButton icon={Trash2} label="Remove group" size="xs" onClick={() => set({ oreGroups: d.oreGroups.filter((_, j) => j !== i) })} />
+          </div>
+        ))}
+        <div className="px-5 py-2.5">
+          <Button size="xs" variant="ghost" icon={Plus} disabled={d.oreGroups.length >= 64}
+            onClick={() => set({ oreGroups: [...d.oreGroups, { name: `Group ${d.oreGroups.length + 1}`, blocks: ['minecraft:'] }] })}>
+            Add group
+          </Button>
+        </div>
+      </SettingsGroup>
+      <SaveBar dirty={f.dirty} saving={f.saving} onSave={() => void f.save()} onReset={f.reset} label="vein mining" />
+    </div>
+  );
+}
+
 /* ═════════════════════ HARVEST BOOSTS ═════════════════════ */
 
 type HarvestOffer = { id: string; name: string; multiplier: number; seconds: number; price: string };
@@ -755,16 +824,12 @@ function HarvestEditor({ server }: { server: Server }) {
         <div className="flex flex-col gap-1.5 px-5 py-3">
           <div className="text-sm">Boosted blocks</div>
           <div className="text-xs text-fg-3">One block id or #tag per line. #c:ores covers every vanilla and Cobblemon ore. Drops that are the block itself (Silk Touch) are never multiplied.</div>
-          <textarea value={d.blocks.join('\n')} spellCheck={false}
-            onChange={(e) => set({ blocks: e.target.value.split('\n').map((l) => l.trim()).filter(Boolean).slice(0, 256) })}
-            className="mt-1 h-24 w-full resize-y rounded-md border border-line bg-bg-1 p-2 font-mono text-[12px] text-fg-2 outline-none" />
+          <LinesArea value={d.blocks} onChange={(v) => set({ blocks: v })} max={256} className="mt-1 h-24 p-2" />
         </div>
         <div className="flex flex-col gap-1.5 px-5 py-3">
           <div className="text-sm">Boost only when naturally generated</div>
           <div className="text-xs text-fg-3">Blocks that drop themselves (like ancient debris). They are boosted when the world generated them; blocks a player placed (or pushed with a piston) drop normally, so nothing can be duplicated. One block id per line.</div>
-          <textarea value={(d.selfDropBlocks ?? ['minecraft:ancient_debris']).join('\n')} spellCheck={false}
-            onChange={(e) => set({ selfDropBlocks: e.target.value.split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#')).slice(0, 64) })}
-            className="mt-1 h-16 w-full resize-y rounded-md border border-line bg-bg-1 p-2 font-mono text-[12px] text-fg-2 outline-none" />
+          <LinesArea value={d.selfDropBlocks ?? ['minecraft:ancient_debris']} onChange={(v) => set({ selfDropBlocks: v })} max={64} keep={(l) => !l.startsWith('#')} className="mt-1 h-16 p-2" />
         </div>
       </SettingsGroup>
       <SaveBar dirty={f.dirty} saving={f.saving} onSave={() => void f.save()} onReset={f.reset} label="harvest boosts" />
@@ -992,7 +1057,7 @@ function AdvancedEditor({ server }: { server: Server }) {
             <Select
               value={name}
               onChange={(v) => setName(v as FileName)}
-              options={['gym_tiers.json', 'quests.json', 'achievements.json', 'portal.json', 'starter.json', 'spawn_boosts.json', 'legendary_shop.json', 'selling.json', 'harvest_boosts.json']}
+              options={['gym_tiers.json', 'quests.json', 'achievements.json', 'portal.json', 'starter.json', 'spawn_boosts.json', 'legendary_shop.json', 'selling.json', 'harvest_boosts.json', 'veinmining.json']}
               width={190}
             />
             <Button size="xs" variant="ghost" icon={RotateCcw} onClick={() => f.data !== null && setText(JSON.stringify(f.data, null, 2))}>
@@ -1062,6 +1127,7 @@ export function GameplayTab({ s }: { s: Server }) {
             { value: 'prices', label: 'Prices' },
             { value: 'selling', label: 'Selling' },
             { value: 'harvest', label: 'Harvest boosts' },
+            { value: 'vein', label: 'Vein mining' },
             { value: 'starter', label: 'Starter' },
             { value: 'advanced', label: 'Advanced' },
           ]}
@@ -1107,6 +1173,7 @@ export function GameplayTab({ s }: { s: Server }) {
       {section === 'prices' && <PricesEditor server={s} />}
       {section === 'selling' && <SellingEditor server={s} />}
       {section === 'harvest' && <HarvestEditor server={s} />}
+      {section === 'vein' && <VeinEditor server={s} />}
       {section === 'starter' && <StarterEditor server={s} />}
       {section === 'advanced' && <AdvancedEditor server={s} />}
     </div>
