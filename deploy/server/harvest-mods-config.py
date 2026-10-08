@@ -6,7 +6,7 @@ Tool rule: breaking a vein or a tree costs the tool the same as breaking ONE blo
   FallingTree: damageMultiplicand=0      -> whole tree = 1 durability (the normal hit)
 Activation:
   VeinMiner:   sneak while mining an ore
-  FallingTree: fells by default; sneak to break a single log (sneakMode SNEAK_DISABLE)
+  FallingTree: always fells (sneakMode IGNORE); log builds without leaves are never felled
 """
 import json, sys, os, re
 
@@ -73,7 +73,7 @@ f['tools']['durabilityMode'] = 'NORMAL'
 f['trees']['maxSize'] = 300                 # big Cobbleverse trees
 f['trees']['maxSizeAction'] = 'CUT'         # fell what fits instead of refusing
 f['trees']['minimumLeavesAroundRequired'] = 1  # log builds without leaves are never felled
-f['sneakMode'] = 'SNEAK_DISABLE'
+f['sneakMode'] = 'IGNORE'  # trees fall whether or not you sneak (sneaking is for vein mining)
 save(f_path, f)
 
 print('VeinMiner ore groups:', len(groups), '| single blocks:', len(single), '| maxChain', s['maxChain'], '| delay', s['delay'], '| mergeItemDrops', s['mergeItemDrops'], '| mustSneak', s['mustSneak'], '| decreaseDurability', s['decreaseDurability'])
