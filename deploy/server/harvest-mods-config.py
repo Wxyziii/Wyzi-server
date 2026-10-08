@@ -8,7 +8,7 @@ Activation:
   VeinMiner:   sneak while mining an ore
   FallingTree: fells by default; sneak to break a single log (sneakMode SNEAK_DISABLE)
 """
-import json, sys, os
+import json, sys, os, re
 
 root = sys.argv[1]
 cfg = os.path.join(root, 'config')
@@ -35,30 +35,35 @@ s.update({'mustSneak': True, 'decreaseDurability': False, 'maxChain': MAX_CHAIN,
 save(s_path, s)
 
 g_path = os.path.join(cfg, 'Veinminer', 'groups.json')
-groups = [g for g in load(g_path) if g['name'] != 'Wood']  # trees belong to FallingTree
-cobblemon_ores = [f'cobblemon:{n}' for n in (
+b_path = os.path.join(cfg, 'Veinminer', 'blocks.json')
+pickaxes = ['minecraft:wooden_pickaxe', 'minecraft:stone_pickaxe', 'minecraft:golden_pickaxe', 'minecraft:iron_pickaxe', 'minecraft:diamond_pickaxe', 'minecraft:netherite_pickaxe']
+vanilla_ores = ['minecraft:' + n for n in (
+    'coal_ore deepslate_coal_ore copper_ore deepslate_copper_ore diamond_ore deepslate_diamond_ore emerald_ore deepslate_emerald_ore '
+    'gold_ore deepslate_gold_ore nether_gold_ore iron_ore deepslate_iron_ore lapis_ore deepslate_lapis_ore redstone_ore '
+    'deepslate_redstone_ore nether_quartz_ore ancient_debris').split()]
+cobblemon_ores = ['cobblemon:' + n for n in (
     'dawn_stone_ore deepslate_dawn_stone_ore dusk_stone_ore deepslate_dusk_stone_ore fire_stone_ore deepslate_fire_stone_ore '
     'nether_fire_stone_ore ice_stone_ore deepslate_ice_stone_ore leaf_stone_ore deepslate_leaf_stone_ore moon_stone_ore '
     'deepslate_moon_stone_ore dripstone_moon_stone_ore shiny_stone_ore deepslate_shiny_stone_ore sun_stone_ore '
     'deepslate_sun_stone_ore terracotta_sun_stone_ore thunder_stone_ore deepslate_thunder_stone_ore water_stone_ore '
     'deepslate_water_stone_ore').split()]
-# natural stone and earth; cobblestone, planks, polished/brick variants stay out so builds are never vein-mined
-pickaxes = ['minecraft:wooden_pickaxe', 'minecraft:stone_pickaxe', 'minecraft:golden_pickaxe', 'minecraft:iron_pickaxe', 'minecraft:diamond_pickaxe', 'minecraft:netherite_pickaxe']
-shovels = [t.replace('pickaxe', 'shovel') for t in pickaxes]
-extra = {
-    'Stone': (['minecraft:stone', 'minecraft:deepslate', 'minecraft:granite', 'minecraft:diorite', 'minecraft:andesite', 'minecraft:tuff',
-               'minecraft:calcite', 'minecraft:dripstone_block', 'minecraft:netherrack', 'minecraft:basalt', 'minecraft:blackstone',
-               'minecraft:end_stone', 'minecraft:smooth_basalt'], pickaxes),
-    'Earth': (['minecraft:dirt', 'minecraft:coarse_dirt', 'minecraft:rooted_dirt', 'minecraft:gravel', 'minecraft:sand', 'minecraft:red_sand',
-               'minecraft:clay', 'minecraft:mud', 'minecraft:soul_sand', 'minecraft:soul_soil'], shovels),
-}
-groups = [g for g in groups if g['name'] not in extra]
-for name, (blocks, tools) in extra.items():
-    groups.append({'name': name, 'blocks': blocks, 'tools': tools})
-for g in groups:
-    if g['name'] == 'Ores':
-        g['blocks'] = g['blocks'] + [b for b in cobblemon_ores if b not in g['blocks']]
+
+# One group per ore TYPE: the stone and deepslate variants of the same ore are one vein, different ores never mix.
+def ore_type(block_id):
+    ns, path = block_id.split(':')
+    return ns + ':' + re.sub(r'^(deepslate|nether|dripstone|terracotta)_', '', path)
+ore_groups = {}
+for b in vanilla_ores + cobblemon_ores:
+    ore_groups.setdefault(ore_type(b), []).append(b)
+groups = [{'name': 'Ore ' + key.split(':')[1].replace('_', ' '), 'blocks': blocks, 'tools': pickaxes} for key, blocks in ore_groups.items()]
+
+# Natural stone and earth: single-block list, so a vein is only the exact block you hit (tuff never takes deepslate).
+# Cobblestone, planks, polished and brick variants stay out so builds are never vein-mined.
+single = ['minecraft:' + n for n in (
+    'stone deepslate granite diorite andesite tuff calcite dripstone_block netherrack basalt smooth_basalt blackstone end_stone '
+    'dirt coarse_dirt rooted_dirt gravel sand red_sand clay mud soul_sand soul_soil').split()]
 save(g_path, groups)
+save(b_path, single)
 
 # ---- FallingTree ----
 f_path = os.path.join(cfg, 'fallingtree.json')
@@ -71,5 +76,5 @@ f['trees']['minimumLeavesAroundRequired'] = 1  # log builds without leaves are n
 f['sneakMode'] = 'SNEAK_DISABLE'
 save(f_path, f)
 
-print('VeinMiner groups:', [(g['name'], len(g['blocks'])) for g in groups], '| maxChain', s['maxChain'], '| delay', s['delay'], '| mergeItemDrops', s['mergeItemDrops'], '| mustSneak', s['mustSneak'], '| decreaseDurability', s['decreaseDurability'])
+print('VeinMiner ore groups:', len(groups), '| single blocks:', len(single), '| maxChain', s['maxChain'], '| delay', s['delay'], '| mergeItemDrops', s['mergeItemDrops'], '| mustSneak', s['mustSneak'], '| decreaseDurability', s['decreaseDurability'])
 print('FallingTree: damageMultiplicand', f['tools']['damageMultiplicand'], '| maxSize', f['trees']['maxSize'], f['trees']['maxSizeAction'], '| sneakMode', f['sneakMode'])
