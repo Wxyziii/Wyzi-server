@@ -15,7 +15,7 @@ import { Row, SettingsGroup } from './Tabs';
    Every save is applied live with `/poke reload`; the mod validates each file and keeps the
    previous valid settings when a file is rejected. */
 
-type FileName = 'quests.json' | 'achievements.json' | 'portal.json' | 'starter.json' | 'spawn_boosts.json' | 'legendary_shop.json' | 'selling.json' | 'harvest_boosts.json' | 'veinmining.json' | 'spawn_rates.json' | 'autocraft.json' | 'gym_tiers.json';
+type FileName = 'quests.json' | 'achievements.json' | 'portal.json' | 'starter.json' | 'spawn_boosts.json' | 'legendary_shop.json' | 'selling.json' | 'harvest_boosts.json' | 'veinmining.json' | 'spawn_rates.json' | 'autocraft.json' | 'mega_shop.json' | 'gym_tiers.json';
 type SaveResult = { applied: boolean; ok?: boolean; results: Record<string, string>; message: string };
 
 function useModFile<T>(server: Server, name: FileName) {
@@ -1119,7 +1119,7 @@ function AdvancedEditor({ server }: { server: Server }) {
             <Select
               value={name}
               onChange={(v) => setName(v as FileName)}
-              options={['gym_tiers.json', 'quests.json', 'achievements.json', 'portal.json', 'starter.json', 'spawn_boosts.json', 'legendary_shop.json', 'selling.json', 'spawn_rates.json', 'autocraft.json', 'harvest_boosts.json', 'veinmining.json']}
+              options={['gym_tiers.json', 'quests.json', 'achievements.json', 'portal.json', 'starter.json', 'spawn_boosts.json', 'legendary_shop.json', 'selling.json', 'spawn_rates.json', 'autocraft.json', 'mega_shop.json', 'harvest_boosts.json', 'veinmining.json']}
               width={190}
             />
             <Button size="xs" variant="ghost" icon={RotateCcw} onClick={() => f.data !== null && setText(JSON.stringify(f.data, null, 2))}>
