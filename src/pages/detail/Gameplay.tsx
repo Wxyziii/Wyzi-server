@@ -15,6 +15,9 @@ import { Row, SettingsGroup } from './Tabs';
    Every save is applied live with `/poke reload`; the mod validates each file and keeps the
    previous valid settings when a file is rejected. */
 
+/** The server sets no upper limit for these values; inputs still need a number. */
+const NO_CAP = Number.MAX_SAFE_INTEGER;
+
 type FileName = 'quests.json' | 'achievements.json' | 'portal.json' | 'starter.json' | 'spawn_boosts.json' | 'legendary_shop.json' | 'selling.json' | 'harvest_boosts.json' | 'veinmining.json' | 'spawn_rates.json' | 'autocraft.json' | 'mega_shop.json' | 'gym_tiers.json';
 type SaveResult = { applied: boolean; ok?: boolean; results: Record<string, string>; message: string };
 
@@ -153,9 +156,8 @@ function ExtraRewards({ items, xp, onChange }: { items: Record<string, number> |
             <input
               type="number"
               min={1}
-              max={576}
               value={n}
-              onChange={(e) => onChange({ ...cur, [k]: Math.max(1, Math.min(576, parseInt(e.target.value || '1', 10))) }, xp ?? 0)}
+              onChange={(e) => onChange({ ...cur, [k]: Math.max(1, parseInt(e.target.value || '1', 10) || 1) }, xp ?? 0)}
               className="num w-14 rounded bg-transparent px-1 text-right outline-none"
             />
             <IconButton
@@ -190,9 +192,8 @@ function ExtraRewards({ items, xp, onChange }: { items: Record<string, number> |
         <input
           type="number"
           min={0}
-          max={1000}
           value={xp ?? 0}
-          onChange={(e) => onChange(cur, Math.max(0, Math.min(1000, parseInt(e.target.value || '0', 10))))}
+          onChange={(e) => onChange(cur, Math.max(0, parseInt(e.target.value || '0', 10) || 0))}
           className="num h-7 w-16 rounded-md border border-line bg-bg-1 px-2 text-right text-sm outline-none"
         />
       </div>
@@ -316,7 +317,7 @@ function DefinitionRow({ d, achievement, onChange, onDelete, onDuplicate, open, 
                 </div>
               </Field>
               <Field label={d.type === 'reach_pokemon_level' ? 'Level to reach' : 'Target amount'}>
-                <TextInput icon={null} type="number" min={1} max={d.type === 'reach_pokemon_level' ? 100 : 1000000} value={d.target} onChange={(e) => set('target', Math.max(1, Math.min(d.type === 'reach_pokemon_level' ? 100 : 1000000, parseInt(e.target.value || '1', 10))))} className="w-[140px]" />
+                <TextInput icon={null} type="number" min={1} max={d.type === 'reach_pokemon_level' ? 100 : undefined} value={d.target} onChange={(e) => set('target', Math.max(1, Math.min(d.type === 'reach_pokemon_level' ? 100 : Number.MAX_SAFE_INTEGER, parseInt(e.target.value || '1', 10) || 1)))} className="w-[140px]" />
               </Field>
               <Field label="Reward (₽)">
                 <TextInput icon={Coins} value={d.reward} onChange={(e) => set('reward', digits(e.target.value) || '0')} className="w-[180px]" />
@@ -395,7 +396,7 @@ function AdvancementPanel({ value, onChange }: { value: AdvancementRewards | nul
         <div className="flex flex-col gap-1.5 px-5 py-3">
           <div className="text-sm">Excluded advancements</div>
           <div className="text-xs text-fg-3">One advancement id per line. Use it for feats that already have their own achievement above.</div>
-          <LinesArea value={a.exclude ?? []} onChange={(v) => set({ exclude: v })} max={1024} className="mt-1 h-24 p-2" />
+          <LinesArea value={a.exclude ?? []} onChange={(v) => set({ exclude: v })} max={NO_CAP} className="mt-1 h-24 p-2" />
         </div>
         <div className="px-5 py-2.5 text-xs text-fg-4">
           {overrides} per-advancement override{overrides === 1 ? '' : 's'} · set a custom reward for one advancement under Advanced → achievements.json → advancements.overrides.
@@ -451,7 +452,7 @@ function ObjectivesEditor({ server, achievement }: { server: Server; achievement
           <div className="flex flex-wrap items-center gap-x-6 gap-y-2 border-b border-line px-4 py-3 text-sm">
             <span className="flex items-center gap-2 text-fg-2">
               Daily quests per player
-              <Stepper value={data.dailyCount} onChange={(v) => f.setData({ ...data, dailyCount: v })} min={0} max={Math.min(12, dailyPool)} />
+              <Stepper value={data.dailyCount} onChange={(v) => f.setData({ ...data, dailyCount: v })} min={0} max={dailyPool} />
               <span className="text-2xs text-fg-4">from a pool of {dailyPool}</span>
             </span>
             <span className="flex items-center gap-2 text-fg-2">
@@ -603,8 +604,8 @@ function PricesEditor({ server }: { server: Server }) {
               return (
                 <div key={i} className="grid grid-cols-[1fr_110px_110px_150px_150px_32px] items-center gap-3 px-5 py-2">
                   <span className="font-mono text-[12px] text-fg-2">{o.id}</span>
-                  <TextInput icon={null} type="number" step={0.5} min={1.1} max={20} value={o.multiplier} onChange={(e) => update({ multiplier: Math.max(1.1, Math.min(20, Number(e.target.value) || 1.1)) })} />
-                  <TextInput icon={null} type="number" min={1} max={1440} value={Math.round(o.seconds / 60)} onChange={(e) => update({ seconds: Math.max(1, Math.min(1440, parseInt(e.target.value || '1', 10))) * 60 })} />
+                  <TextInput icon={null} type="number" step={0.5} min={1.1} value={o.multiplier} onChange={(e) => update({ multiplier: Math.max(1.01, Number(e.target.value) || 1.1) })} />
+                  <TextInput icon={null} type="number" min={1} value={Math.round(o.seconds / 60)} onChange={(e) => update({ seconds: Math.max(1, parseInt(e.target.value || '1', 10) || 1) * 60 })} />
                   <TextInput icon={Coins} value={o.price} onChange={(e) => update({ price: digits(e.target.value) || '0' })} />
                   <TextInput
                     icon={Coins}
@@ -651,7 +652,7 @@ function PricesEditor({ server }: { server: Server }) {
             <Switch checked={boosts.data.enabled} onChange={(v) => boosts.setData({ ...boosts.data!, enabled: v })} />
           </Row>
           <Row label="Highest multiplier for legendaries" desc="Caps every offer when the target is legendary.">
-            <TextInput icon={null} type="number" step={0.5} min={1} max={20} value={boosts.data.legendaryMaximum} onChange={(e) => boosts.setData({ ...boosts.data!, legendaryMaximum: Math.max(1, Math.min(20, Number(e.target.value) || 1)) })} className="w-[110px]" />
+            <TextInput icon={null} type="number" step={0.5} min={1} value={boosts.data.legendaryMaximum} onChange={(e) => boosts.setData({ ...boosts.data!, legendaryMaximum: Math.max(1, Number(e.target.value) || 1) })} className="w-[110px]" />
           </Row>
         </SettingsGroup>
       )}
@@ -752,22 +753,22 @@ function SpawningEditor({ server }: { server: Server }) {
           <Switch checked={d.enabled} onChange={(v) => set({ enabled: v })} />
         </Row>
         <Row label="Pokémon per chunk" desc="How crowded it gets around each player (Cobblemon default 1)">
-          <TextInput icon={null} type="number" step={0.25} min={0.1} max={5} value={d.pokemonPerChunk} onChange={(e) => set({ pokemonPerChunk: num(e.target.value, 0.1, 5) })} className="w-[110px]" />
+          <TextInput icon={null} type="number" step={0.25} min={0.1} value={d.pokemonPerChunk} onChange={(e) => set({ pokemonPerChunk: num(e.target.value, 0.01, Infinity) })} className="w-[110px]" />
         </Row>
         <Row label="Spawns per attempt" desc="Pokémon placed per spawn attempt (default 1)">
-          <Stepper value={d.maximumSpawnsPerPass} onChange={(v) => set({ maximumSpawnsPerPass: v })} min={1} max={5} />
+          <Stepper value={d.maximumSpawnsPerPass} onChange={(v) => set({ maximumSpawnsPerPass: v })} min={1} max={NO_CAP} />
         </Row>
         <Row label="Ticks between attempts" desc="Lower = faster spawning (default 10). Applies when a player rejoins.">
-          <TextInput icon={null} type="number" min={1} max={200} value={d.ticksBetweenSpawnAttempts} onChange={(e) => set({ ticksBetweenSpawnAttempts: num(e.target.value, 1, 200) })} className="w-[110px]" />
+          <TextInput icon={null} type="number" min={1} value={d.ticksBetweenSpawnAttempts} onChange={(e) => set({ ticksBetweenSpawnAttempts: num(e.target.value, 1, Infinity) })} className="w-[110px]" />
         </Row>
         <Row label="Min. distance between Pokémon" desc="Blocks (default 8)">
-          <TextInput icon={null} type="number" min={1} max={32} value={d.minimumDistanceBetweenEntities} onChange={(e) => set({ minimumDistanceBetweenEntities: num(e.target.value, 1, 32) })} className="w-[110px]" />
+          <TextInput icon={null} type="number" min={0} value={d.minimumDistanceBetweenEntities} onChange={(e) => set({ minimumDistanceBetweenEntities: num(e.target.value, 0, Infinity) })} className="w-[110px]" />
         </Row>
       </SettingsGroup>
       <SettingsGroup title="Rarity roll" desc="Cobblemon first rolls a rarity, then a Pokémon of that rarity. Raise rare and ultra rare to see those Pokémon more often.">
         {names.map((b) => (
           <Row key={b} label={RARITY_LABEL[b] ?? b} desc={total > 0 ? `${(((d.buckets[b] || 0) / total) * 100).toFixed(1)}% of rolls` : undefined}>
-            <TextInput icon={null} type="number" min={0} max={1000} step={0.1} value={d.buckets[b]} onChange={(e) => set({ buckets: { ...d.buckets, [b]: num(e.target.value, 0, 1000) } })} className="w-[110px]" />
+            <TextInput icon={null} type="number" min={0} step={0.1} value={d.buckets[b]} onChange={(e) => set({ buckets: { ...d.buckets, [b]: num(e.target.value, 0, Infinity) } })} className="w-[110px]" />
           </Row>
         ))}
         <Row label="Boosts also raise the rarity" desc="A bought ×8 boost makes the Pokémon's rarity roll ×8 for the buyer too, not only its share inside that rarity">
@@ -798,7 +799,7 @@ function VeinEditor({ server }: { server: Server }) {
           <Switch checked={d.enabled} onChange={(v) => set({ enabled: v })} />
         </Row>
         <Row label="Max blocks per vein" desc="Protects the server from huge breaks">
-          <TextInput icon={null} type="number" min={1} max={4096} value={d.maxChain} onChange={(e) => set({ maxChain: Math.max(1, Math.min(4096, parseInt(e.target.value || '1', 10))) })} className="w-[110px]" />
+          <TextInput icon={null} type="number" min={1} value={d.maxChain} onChange={(e) => set({ maxChain: Math.max(1, parseInt(e.target.value || '1', 10) || 1) })} className="w-[110px]" />
         </Row>
         <Row label="Only while sneaking">
           <Switch checked={d.mustSneak} onChange={(v) => set({ mustSneak: v })} />
@@ -810,12 +811,12 @@ function VeinEditor({ server }: { server: Server }) {
           <Switch checked={d.mergeItemDrops} onChange={(v) => set({ mergeItemDrops: v })} />
         </Row>
         <Row label="Ripple delay" desc="Ticks between rings of blocks; 0 breaks everything at once">
-          <Stepper value={d.delay} onChange={(v) => set({ delay: v })} min={0} max={20} />
+          <Stepper value={d.delay} onChange={(v) => set({ delay: v })} min={0} max={NO_CAP} />
         </Row>
       </SettingsGroup>
       <SettingsGroup title="Single blocks" desc="Only the exact block you hit is veined (tuff never takes deepslate). One block id per line; #tags work.">
         <div className="px-5 py-3">
-          <LinesArea value={d.singleBlocks} onChange={(v) => set({ singleBlocks: v })} max={512} className="h-56 p-2" />
+          <LinesArea value={d.singleBlocks} onChange={(v) => set({ singleBlocks: v })} max={NO_CAP} className="h-56 p-2" />
           <div className="mt-1 text-2xs text-fg-4">{d.singleBlocks.length} entries · unknown blocks are rejected and the previous list stays active</div>
         </div>
       </SettingsGroup>
@@ -823,7 +824,7 @@ function VeinEditor({ server }: { server: Server }) {
         {d.oreGroups.map((g, i) => (
           <div key={i} className="grid grid-cols-[200px_1fr_32px] items-start gap-3 px-5 py-2.5">
             <TextInput icon={null} value={g.name} onChange={(e) => setGroup(i, { name: e.target.value.slice(0, 48) })} />
-            <LinesArea value={g.blocks} onChange={(v) => setGroup(i, { blocks: v })} max={32} rows={Math.max(2, g.blocks.length + 1)} className="p-1.5" />
+            <LinesArea value={g.blocks} onChange={(v) => setGroup(i, { blocks: v })} max={NO_CAP} rows={Math.max(2, g.blocks.length + 1)} className="p-1.5" />
             <IconButton icon={Trash2} label="Remove group" size="xs" onClick={() => set({ oreGroups: d.oreGroups.filter((_, j) => j !== i) })} />
           </div>
         ))}
@@ -858,10 +859,10 @@ function HarvestEditor({ server }: { server: Server }) {
           <Switch checked={d.enabled} onChange={(v) => set({ enabled: v })} />
         </Row>
         <Row label="Boosts a player can run at once">
-          <Stepper value={d.maxActive} onChange={(v) => set({ maxActive: v })} min={1} max={10} />
+          <Stepper value={d.maxActive} onChange={(v) => set({ maxActive: v })} min={1} max={NO_CAP} />
         </Row>
         <Row label="Highest total multiplier" desc="Stacked boosts add up (×2 + ×3 = ×4) until this limit">
-          <TextInput icon={null} type="number" min={1} max={50} step={0.5} value={d.maxMultiplier} onChange={(e) => set({ maxMultiplier: Math.max(1, Math.min(50, Number(e.target.value) || 1)) })} className="w-[110px]" />
+          <TextInput icon={null} type="number" min={1} step={0.5} value={d.maxMultiplier} onChange={(e) => set({ maxMultiplier: Math.max(1, Number(e.target.value) || 1) })} className="w-[110px]" />
         </Row>
         <div className="grid grid-cols-[1fr_1fr_100px_100px_150px_32px] gap-3 px-5 py-1.5 text-2xs text-fg-4">
           <span>Name</span><span>Id</span><span>Multiplier</span><span>Minutes</span><span>Price ₽</span><span />
@@ -870,8 +871,8 @@ function HarvestEditor({ server }: { server: Server }) {
           <div key={i} className="grid grid-cols-[1fr_1fr_100px_100px_150px_32px] items-center gap-3 px-5 py-2">
             <TextInput icon={null} value={o.name} onChange={(e) => setOffer(i, { name: e.target.value.slice(0, 32) })} />
             <span className="truncate font-mono text-[12px] text-fg-3">{o.id}</span>
-            <TextInput icon={null} type="number" step={0.5} min={1.1} max={20} value={o.multiplier} onChange={(e) => setOffer(i, { multiplier: Math.max(1.1, Math.min(20, Number(e.target.value) || 1.1)) })} />
-            <TextInput icon={null} type="number" min={1} max={1440} value={Math.round(o.seconds / 60)} onChange={(e) => setOffer(i, { seconds: Math.max(1, Math.min(1440, parseInt(e.target.value || '1', 10))) * 60 })} />
+            <TextInput icon={null} type="number" step={0.5} min={1.1} value={o.multiplier} onChange={(e) => setOffer(i, { multiplier: Math.max(1.01, Number(e.target.value) || 1.1) })} />
+            <TextInput icon={null} type="number" min={1} value={Math.round(o.seconds / 60)} onChange={(e) => setOffer(i, { seconds: Math.max(1, parseInt(e.target.value || '1', 10) || 1) * 60 })} />
             <TextInput icon={Coins} value={o.price} onChange={(e) => setOffer(i, { price: digits(e.target.value) || '0' })} />
             <IconButton icon={Trash2} label="Remove" size="xs" onClick={() => set({ offers: d.offers.filter((_, j) => j !== i) })} />
           </div>
@@ -886,12 +887,12 @@ function HarvestEditor({ server }: { server: Server }) {
         <div className="flex flex-col gap-1.5 px-5 py-3">
           <div className="text-sm">Boosted blocks</div>
           <div className="text-xs text-fg-3">One block id or #tag per line. #c:ores covers every vanilla and Cobblemon ore. Drops that are the block itself (Silk Touch) are never multiplied.</div>
-          <LinesArea value={d.blocks} onChange={(v) => set({ blocks: v })} max={256} className="mt-1 h-24 p-2" />
+          <LinesArea value={d.blocks} onChange={(v) => set({ blocks: v })} max={NO_CAP} className="mt-1 h-24 p-2" />
         </div>
         <div className="flex flex-col gap-1.5 px-5 py-3">
           <div className="text-sm">Boost only when naturally generated</div>
           <div className="text-xs text-fg-3">Blocks that drop themselves (like ancient debris). They are boosted when the world generated them; blocks a player placed (or pushed with a piston) drop normally, so nothing can be duplicated. One block id per line.</div>
-          <LinesArea value={d.selfDropBlocks ?? ['minecraft:ancient_debris']} onChange={(v) => set({ selfDropBlocks: v })} max={64} keep={(l) => !l.startsWith('#')} className="mt-1 h-16 p-2" />
+          <LinesArea value={d.selfDropBlocks ?? ['minecraft:ancient_debris']} onChange={(v) => set({ selfDropBlocks: v })} max={NO_CAP} keep={(l) => !l.startsWith('#')} className="mt-1 h-16 p-2" />
         </div>
       </SettingsGroup>
       <SaveBar dirty={f.dirty} saving={f.saving} onSave={() => void f.save()} onReset={f.reset} label="harvest boosts" />
@@ -936,7 +937,7 @@ function SellingEditor({ server }: { server: Server }) {
           <TextInput icon={Coins} value={d.pokemon.hiddenAbilityBonus} onChange={(e) => pk({ hiddenAbilityBonus: money1(e.target.value) })} className="w-[160px]" />
         </Row>
         <Row label="Shiny multiplier" desc="Applied to the whole price">
-          <Stepper value={d.pokemon.shinyPercent} onChange={(v) => pk({ shinyPercent: v })} min={100} max={10000} step={50} suffix="%" />
+          <Stepper value={d.pokemon.shinyPercent} onChange={(v) => pk({ shinyPercent: v })} min={0} max={NO_CAP} step={50} suffix="%" />
         </Row>
         <Row label="Allow selling shinies">
           <Switch checked={d.pokemon.allowShiny} onChange={(v) => pk({ allowShiny: v })} />
@@ -1061,7 +1062,7 @@ function StarterEditor({ server }: { server: Server }) {
         {kit.map(([id, count]) => (
           <Row key={id} label={id}>
             <div className="flex items-center gap-2">
-              <Stepper value={count} onChange={(v) => set('kit', { ...s.kit, [id]: v })} min={1} max={64} />
+              <Stepper value={count} onChange={(v) => set('kit', { ...s.kit, [id]: v })} min={1} max={NO_CAP} />
               <IconButton
                 icon={Trash2}
                 label="Remove"
