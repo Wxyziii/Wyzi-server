@@ -15,7 +15,7 @@ import { Row, SettingsGroup } from './Tabs';
    Every save is applied live with `/poke reload`; the mod validates each file and keeps the
    previous valid settings when a file is rejected. */
 
-type FileName = 'quests.json' | 'achievements.json' | 'portal.json' | 'starter.json' | 'spawn_boosts.json' | 'legendary_shop.json' | 'selling.json' | 'harvest_boosts.json' | 'veinmining.json' | 'spawn_rates.json' | 'gym_tiers.json';
+type FileName = 'quests.json' | 'achievements.json' | 'portal.json' | 'starter.json' | 'spawn_boosts.json' | 'legendary_shop.json' | 'selling.json' | 'harvest_boosts.json' | 'veinmining.json' | 'spawn_rates.json' | 'autocraft.json' | 'gym_tiers.json';
 type SaveResult = { applied: boolean; ok?: boolean; results: Record<string, string>; message: string };
 
 function useModFile<T>(server: Server, name: FileName) {
@@ -527,6 +527,7 @@ const SERVICES: { key: string; label: string; desc: string }[] = [
   { key: 'repair', label: 'Tool repair', desc: 'Per damaged item, full durability' },
   { key: 'unbreakable_book', label: 'Unbreaking ∞ book', desc: 'Enchanted book: the item never breaks' },
   { key: 'autosmelt_book', label: 'Auto-Smelt book', desc: 'Enchanted book: mined ores drop smelted (pickaxe, axe, shovel, hoe)' },
+  { key: 'autocraft_book', label: 'Auto-Craft book', desc: 'Enchanted book: carried inventory and backpacks compact nuggets/scrap (recipes in Advanced → autocraft.json)' },
 ];
 const RARITIES = ['common', 'uncommon', 'rare', 'ultra-rare', 'legendary'];
 
@@ -1118,7 +1119,7 @@ function AdvancedEditor({ server }: { server: Server }) {
             <Select
               value={name}
               onChange={(v) => setName(v as FileName)}
-              options={['gym_tiers.json', 'quests.json', 'achievements.json', 'portal.json', 'starter.json', 'spawn_boosts.json', 'legendary_shop.json', 'selling.json', 'spawn_rates.json', 'harvest_boosts.json', 'veinmining.json']}
+              options={['gym_tiers.json', 'quests.json', 'achievements.json', 'portal.json', 'starter.json', 'spawn_boosts.json', 'legendary_shop.json', 'selling.json', 'spawn_rates.json', 'autocraft.json', 'harvest_boosts.json', 'veinmining.json']}
               width={190}
             />
             <Button size="xs" variant="ghost" icon={RotateCcw} onClick={() => f.data !== null && setText(JSON.stringify(f.data, null, 2))}>

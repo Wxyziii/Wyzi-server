@@ -32,6 +32,7 @@ FILES: dict[str, dict] = {
     "selling.json": {"label": "Selling", "kind": "object", "required": ["pokemon", "items"]},
     "veinmining.json": {"label": "Vein mining", "kind": "object", "required": ["enabled", "maxChain", "singleBlocks", "oreGroups"]},
     "spawn_rates.json": {"label": "Spawning", "kind": "object", "required": ["enabled", "buckets", "pokemonPerChunk", "maximumSpawnsPerPass"]},
+    "autocraft.json": {"label": "Auto-Craft recipes", "kind": "object", "required": ["enabled", "intervalTicks", "recipes"]},
     "harvest_boosts.json": {"label": "Harvest boosts", "kind": "object", "required": ["enabled", "maxActive", "maxMultiplier", "blocks", "offers"]},
     "gym_tiers.json": {"label": "Gym difficulty tiers", "kind": "object", "required": ["tiers"]},
 }
